@@ -193,6 +193,10 @@ function esc(s){
 }
 
 // ── Firebase listeners ────────────────────────────────────────────────────────
+// Note: access control is handled entirely by the Vercel login (username/password),
+// so we connect directly to Realtime Database without requiring Firebase Anonymous
+// Auth. (Anonymous Auth previously gated this and silently broke data sync when
+// the Anonymous provider wasn't enabled in the Firebase console.)
 let listenersStarted=false;
 function startListeners(){
   if(listenersStarted) return;
@@ -200,18 +204,14 @@ function startListeners(){
   db.ref('positions').on('value', snap=>{
     data = snap.val() || {};
     render();
-  });
+  }, err=>{ console.error('positions listener error', err); notify('שגיאת חיבור למסד הנתונים','warn'); });
   db.ref('movements').on('value', snap=>{
     const raw = snap.val() || {};
     movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts)).slice(0,500);
     render();
-  });
+  }, err=>{ console.error('movements listener error', err); });
 }
-auth.onAuthStateChanged(user=>{ if(user) startListeners(); });
-auth.signInAnonymously().catch(err=>{
-  console.error('Anonymous auth failed', err);
-  notify('שגיאת התחברות לשרת — נסי לרענן','error');
-});
+startListeners();
 
 // ── פעולות נתונים ────────────────────────────────────────────────────────────
 async function doSave(posId){
