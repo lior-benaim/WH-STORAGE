@@ -140,18 +140,23 @@ const AISLES  = ["ZA","ZB","ZC","ZD","ZE","ZF","ZG","ZH","ZI"];
 const CUBES   = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
 const FLOORS  = [1,2,3,4,5,6,7,8,9,10,11];
 const WALKWAY = [4,11];
+const WALKWAY_EXCEPTION_AISLE = "ZI"; // in this aisle, cubes 4 & 11 are NOT walkways — full 1-11 floors
 const p2 = n => String(n).padStart(2,"0");
-const cubeFloors = c => FLOORS.filter(f => !WALKWAY.includes(c) || f >= 5);
+const cubeFloors = (c, aisle) => FLOORS.filter(f => !WALKWAY.includes(c) || aisle===WALKWAY_EXCEPTION_AISLE || f >= 5);
 
 const ALL_POS = (() => {
   const out = [];
-  AISLES.forEach(a => CUBES.forEach(c => cubeFloors(c).forEach(f =>
+  AISLES.forEach(a => CUBES.forEach(c => cubeFloors(c,a).forEach(f =>
     [1,2,3].forEach(p => out.push(`${a}${c}-${p2(f)}-${p2(p)}`))
   )));
   return out;
 })();
 const POS_BC     = Object.fromEntries(ALL_POS.map((pos,i) => [pos, "P"+String(i+1).padStart(5,"0")]));
 const POS_BC_REV = Object.fromEntries(ALL_POS.map((pos,i) => ["P"+String(i+1).padStart(5,"0"), pos]));
+
+// One-time seed data — 65 positions already placed on paper before the system went live.
+// Import via Settings → "ייבוא נתונים ראשוניים". Existing positions are never overwritten.
+const SEED_DATA = {"ZH12-01-01":{"sku":"SAM-079","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZH12-01-02":{"sku":"SAM-120","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZH12-01-03":{"sku":"SAM-121","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy + Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH13-01-01":{"sku":"SAM-088","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZH13-01-02":{"sku":"SAM-066","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH13-01-03":{"sku":"SAM-114","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZH14-01-01":{"sku":"SAM-108","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZH14-01-02":{"sku":"SAM-072","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH14-01-03":{"sku":"SAM-071","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH14-02-03":{"sku":"SAM-083","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZH15-01-01":{"sku":"SAM-126","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream + Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH15-01-02":{"sku":"SAM-067","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZH15-01-03":{"sku":"SAM-091","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZH15-02-01":{"sku":"SAM-087","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZH16-01-01":{"sku":"SAM-104","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZH16-01-02":{"sku":"SAM-107","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZH16-01-03":{"sku":"SAM-131","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI11-01-01":{"sku":"SAM-090","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI11-01-02":{"sku":"SAM-113","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI11-01-03":{"sku":"SAM-117","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI11-02-01":{"sku":"SAM-089","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI11-02-02":{"sku":"SAM-115","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI11-02-03":{"sku":"SAM-111","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI11-03-01":{"sku":"SAM-123","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI11-03-02":{"sku":"SAM-094","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI11-03-03":{"sku":"SAM-129","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black + Navy","updatedAt":"2026-07-08T00:00:00"},"ZI12-01-01":{"sku":"SAM-118","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI12-01-02":{"sku":"SAM-109","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI12-01-03":{"sku":"SAM-110","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI12-02-01":{"sku":"SAM-097","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI12-02-02":{"sku":"SAM-064","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI12-02-03":{"sku":"SAM-093","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI12-03-01":{"sku":"SAM-082","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI12-03-02":{"sku":"SAM-080","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI12-03-03":{"sku":"SAM-127","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI13-01-01":{"sku":"SAM-103","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI13-01-02":{"sku":"SAM-065","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI13-01-03":{"sku":"SAM-096","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI13-02-01":{"sku":"SAM-101","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI13-02-02":{"sku":"SAM-099","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI13-02-03":{"sku":"SAM-128","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI13-03-01":{"sku":"SAM-116","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI13-03-02":{"sku":"SAM-069","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI13-03-03":{"sku":"SAM-122","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI14-01-01":{"sku":"SAM-084","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI14-01-02":{"sku":"SAM-133","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI14-01-03":{"sku":"SAM-095","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI14-02-01":{"sku":"SAM-102","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI14-02-02":{"sku":"SAM-085","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI14-02-03":{"sku":"SAM-106","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI14-03-01":{"sku":"SAM-105","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI14-03-02":{"sku":"SAM-078","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI14-03-03":{"sku":"SAM-081","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI15-01-01":{"sku":"SAM-132","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black + Navy","updatedAt":"2026-07-08T00:00:00"},"ZI15-01-02":{"sku":"SAM-134","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream + Black + Navy","updatedAt":"2026-07-08T00:00:00"},"ZI15-01-03":{"sku":"SAM-119","name":"Olivia set","qty":1,"unit":"קרטון","note":"Navy","updatedAt":"2026-07-08T00:00:00"},"ZI15-02-01":{"sku":"SAM-130","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki + Navy + Black","updatedAt":"2026-07-08T00:00:00"},"ZI15-03-01":{"sku":"SAM-098","name":"Olivia set","qty":1,"unit":"קרטון","note":"Cream","updatedAt":"2026-07-08T00:00:00"},"ZI15-03-02":{"sku":"SAM-125","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI15-03-03":{"sku":"SAM-124","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black + Navy","updatedAt":"2026-07-08T00:00:00"},"ZI16-01-01":{"sku":"SAM-076","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI16-01-02":{"sku":"SAM-092","name":"Olivia set","qty":1,"unit":"קרטון","note":"Black","updatedAt":"2026-07-08T00:00:00"},"ZI16-01-03":{"sku":"SAM-068","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI16-03-01":{"sku":"SAM-070","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki","updatedAt":"2026-07-08T00:00:00"},"ZI16-03-02":{"sku":"SAM-077","name":"Olivia set","qty":1,"unit":"קרטון","note":"Khaki + Navy","updatedAt":"2026-07-08T00:00:00"}};
 
 const fmtD  = d => new Date(d).toLocaleDateString("he-IL");
 const fmtDT = d => new Date(d).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
@@ -259,6 +264,21 @@ function doScan(val){
 }
 function openPos(posId){ scanPos=posId; editing=false; }
 function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editing=false; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
+
+async function importSeedData(){
+  const keys = Object.keys(SEED_DATA);
+  let imported = 0, skipped = 0;
+  for(const posId of keys){
+    if(data[posId]){ skipped++; continue; }
+    await db.ref('positions/'+fkey(posId)).set(SEED_DATA[posId]);
+    await db.ref('movements/'+mkId()).set({
+      ts:new Date().toISOString(), pos:posId, type:'in',
+      sku:SEED_DATA[posId].sku, qty:SEED_DATA[posId].qty, unit:SEED_DATA[posId].unit
+    });
+    imported++;
+  }
+  notify(`✓ יובאו ${imported} עמדות${skipped?` · דולגו ${skipped} (כבר מלאות)`:''}`);
+}
 
 function exportToExcel(){
   const rows = ALL_POS.filter(pos=>data[pos]).map(pos=>{
@@ -430,7 +450,7 @@ function render(){
         <div class="row-id">קובייה ${c}</div>
         <div style="flex:1">
           <div class="row-meta">${used}/${positions.length} עמדות תפוסות</div>
-          ${WALKWAY.includes(c)?'<div style="font-size:9px;color:var(--blue)">מעבר רגלי — קומות 5-11</div>':''}
+          ${(WALKWAY.includes(c) && mAisle!==WALKWAY_EXCEPTION_AISLE)?'<div style="font-size:9px;color:var(--blue)">מעבר רגלי — קומות 5-11</div>':''}
         </div>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);flex-shrink:0"><polyline points="15 18 9 12 15 6"/></svg>
       </div>`;
@@ -438,7 +458,7 @@ function render(){
     contentHtml = `<div class="list">${rows}</div>`;
   }
   else if(tab==='map' && mAisle && mCube && !mPos){
-    const rows = cubeFloors(mCube).map(f=>{
+    const rows = cubeFloors(mCube, mAisle).map(f=>{
       const positions = [`${mAisle}${mCube}-${p2(f)}-01`,`${mAisle}${mCube}-${p2(f)}-02`,`${mAisle}${mCube}-${p2(f)}-03`];
       const used = positions.filter(p=>data[p]).length;
       const boxes = positions.map(pid=>{
@@ -522,9 +542,9 @@ function render(){
         <div class="info-row"><span>מעברים</span><span class="info-val">ZA–ZI (9)</span></div>
         <div class="info-row"><span>קוביות לכל מעבר</span><span class="info-val">16</span></div>
         <div class="info-row"><span>קומות (רגיל)</span><span class="info-val">1–11</span></div>
-        <div class="info-row"><span>קומות (קוביות 4 ו-11)</span><span class="info-val">5–11 בלבד</span></div>
+        <div class="info-row"><span>קומות (קוביות 4 ו-11)</span><span class="info-val">5–11 (למעט ZI: 1–11)</span></div>
         <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3</span></div>
-        <div class="info-row"><span>סה"כ עמדות</span><span class="info-val">4,536</span></div>
+        <div class="info-row"><span>סה"כ עמדות</span><span class="info-val">${ALL_POS.length.toLocaleString()}</span></div>
       </div>
       <div class="settings-sec">
         <div class="settings-ttl">נתונים</div>
@@ -532,6 +552,11 @@ function render(){
         <div class="info-row"><span>דגמים שונים</span><span class="info-val">${uniqSKUs}</span></div>
         <div class="info-row"><span>תנועות ביומן</span><span class="info-val">${movs.length}</span></div>
         <button class="btn btn-blue btn-w" onclick="exportToExcel()" style="margin-top:10px">📥 ייצוא מלאי לאקסל</button>
+      </div>
+      <div class="settings-sec">
+        <div class="settings-ttl">ייבוא נתונים</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">ייבוא חד-פעמי של 65 עמדות שכבר מולאו לפני עליית המערכת (Olivia set). עמדות תפוסות לא יידרסו.</div>
+        <button class="btn btn-p btn-w" onclick="importSeedData()">⬆️ ייבוא נתונים ראשוניים</button>
       </div>
       <div class="settings-sec">
         <div class="settings-ttl">הדפסת מדבקות ברקוד</div>
@@ -600,6 +625,11 @@ window.doScan = doScan;
 window.resetScan = resetScan;
 window.printLabels = printLabels;
 window.exportToExcel = exportToExcel;
+window.importSeedData = ()=>{
+  if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות קיימות לא יידרסו.')){
+    importSeedData();
+  }
+};
 window.switchTab = switchTab;
 window.render = render;
 window.setAisle = (a)=>{ mAisle=a; render(); };
