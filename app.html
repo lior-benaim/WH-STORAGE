@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>מחסן ADDICT</title>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0C0C0C;--surf:#181818;--card:#212121;--b:#2C2C2C;--b2:#3A3A3A;
+  --acc:#F0C419;--ad:rgba(240,196,25,.09);--ag:rgba(240,196,25,.22);
+  --txt:#EAE5D8;--sub:#888;--mut:#484848;
+  --grn:#22C55E;--red:#EF4444;--blue:#60A5FA;
+  --r:9px;--rs:5px;
+}
+html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;direction:rtl;min-height:100vh}
+.app{max-width:600px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
+.hdr{background:var(--surf);border-bottom:1px solid var(--b);padding:11px 13px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:50}
+.hdr-t{font-size:14px;font-weight:700;flex:1;display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden}
+.bk{font-size:11px;color:var(--sub);cursor:pointer;padding:2px 5px;border-radius:3px;flex-shrink:0}
+.bk:hover{color:var(--acc)}
+.badge{background:var(--ad);color:var(--acc);border:1px solid var(--ag);border-radius:20px;padding:2px 8px;font-size:10px;font-weight:800}
+.logout-btn{background:rgba(239,68,68,.09);color:var(--red);border:1px solid rgba(239,68,68,.2);border-radius:20px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap}
+.content{flex:1;overflow-y:auto;padding:12px 12px 82px}
+.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:var(--surf);border-top:1px solid var(--b);display:flex;z-index:100}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;cursor:pointer;background:none;border:none;color:var(--mut);font-size:9px;font-weight:700;transition:color .15s}
+.nb.on{color:var(--acc)}
+.nb svg{width:18px;height:18px;stroke-width:1.8}
+.stats{display:flex;gap:6px;margin-bottom:12px}
+.stat{flex:1;background:var(--card);border-radius:var(--r);border:1px solid var(--b);padding:9px 4px;text-align:center}
+.stat-n{font-size:19px;font-weight:900;color:var(--acc);line-height:1}
+.stat-l{font-size:9px;color:var(--sub);margin-top:2px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:12px}
+.tile{background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:11px 6px;text-align:center;cursor:pointer}
+.tile:hover{border-color:var(--acc)}
+.tile-name{font-size:17px;font-weight:900;color:var(--acc);font-family:ui-monospace,monospace}
+.tile-sub{font-size:10px;color:var(--sub);margin-top:3px}
+.fill-bar{height:3px;background:var(--b);border-radius:2px;margin-top:4px;overflow:hidden}
+.fill-inner{height:100%;background:var(--acc);border-radius:2px}
+.list{display:flex;flex-direction:column;gap:4px}
+.row{background:var(--card);border:1px solid var(--b);border-radius:var(--rs);padding:9px 11px;cursor:pointer;display:flex;align-items:center;gap:9px}
+.row:hover{border-color:var(--acc)}
+.row-id{font-family:ui-monospace,monospace;font-size:12px;font-weight:800;color:var(--acc);min-width:70px}
+.row-meta{font-size:11px;color:var(--sub);flex:1}
+.pos-view{background:var(--card);border-radius:var(--r);padding:14px;border:1px solid var(--b)}
+.pos-view-id{font-size:22px;font-weight:900;color:var(--acc);letter-spacing:2px;font-family:ui-monospace,monospace;line-height:1}
+.pos-view-sub{font-size:11px;color:var(--sub);margin-top:3px}
+.pos-content{margin-top:14px}
+.pos-sku{font-size:18px;font-weight:900;color:var(--acc);font-family:ui-monospace,monospace;letter-spacing:1px}
+.pos-name{font-size:14px;margin-top:3px}
+.pos-qty{font-size:28px;font-weight:900;line-height:1;margin-top:6px}
+.pos-unit{font-size:11px;color:var(--sub)}
+.pos-date{font-size:11px;color:var(--sub);margin-top:4px}
+.pos-empty{text-align:center;padding:20px 0;color:var(--mut);font-size:13px}
+.edit-form{background:var(--surf);border:1px solid var(--acc);border-radius:var(--rs);padding:12px;margin-top:12px}
+.edit-title{font-size:12px;font-weight:800;color:var(--acc);margin-bottom:10px}
+.fsec{background:var(--card);border-radius:var(--r);padding:12px;margin-bottom:10px;border:1px solid var(--b)}
+.flbl{font-size:10px;color:var(--sub);font-weight:800;margin-bottom:4px;display:block;letter-spacing:.5px;text-transform:uppercase}
+.finp{width:100%;background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:9px 10px;color:var(--txt);font-size:14px;outline:none;transition:border-color .15s;direction:ltr}
+.finp.rtl{direction:rtl}
+.finp:focus{border-color:var(--acc)}
+.finp::placeholder{color:var(--mut)}
+.frow{display:flex;gap:7px}
+.frow .fg{flex:1}
+.fg{margin-bottom:9px}
+select.finp{cursor:pointer}
+.scan-inp{width:100%;background:var(--bg);border:2px solid var(--acc);border-radius:var(--rs);padding:13px 14px;color:var(--txt);font-size:18px;outline:none;font-family:ui-monospace,monospace;letter-spacing:1px;direction:ltr;text-align:center}
+.scan-inp::placeholder{font-size:12px;letter-spacing:0;color:var(--mut);font-family:-apple-system,sans-serif}
+.btn{padding:8px 13px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.btn-p{background:var(--acc);color:#111}
+.btn-p:hover{filter:brightness(1.08)}
+.btn-p:disabled{opacity:.3;cursor:not-allowed}
+.btn-g{background:transparent;color:var(--txt);border:1px solid var(--b)}
+.btn-d{background:rgba(239,68,68,.09);color:var(--red);border:1px solid rgba(239,68,68,.2)}
+.btn-blue{background:rgba(96,165,250,.1);color:var(--blue);border:1px solid rgba(96,165,250,.25)}
+.btn-w{width:100%}
+.btn-sm{padding:4px 9px;font-size:11px}
+.sr{background:var(--card);border-radius:var(--r);padding:10px;margin-bottom:6px;border:1px solid var(--b);cursor:pointer;transition:border-color .15s;display:flex;align-items:center;gap:8px}
+.sr:hover{border-color:var(--acc)}
+.mov{display:flex;gap:9px;padding:10px 0;border-bottom:1px solid var(--b);align-items:flex-start}
+.mov-ic{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.mov-ic.in{background:rgba(34,197,94,.12);color:var(--grn)}
+.mov-ic.out{background:rgba(239,68,68,.12);color:var(--red)}
+.mov-ic.edit{background:rgba(240,196,25,.12);color:var(--acc)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;z-index:300;padding:12px}
+.modal{background:var(--card);border-radius:12px;padding:16px;width:100%;max-width:380px;border:1px solid var(--b)}
+.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(16,16,16,.96);border:1px solid rgba(34,197,94,.35);color:var(--grn);padding:7px 15px;border-radius:20px;font-size:12px;font-weight:700;z-index:400;white-space:nowrap}
+.toast.warn{border-color:rgba(240,196,25,.4);color:var(--acc)}
+.empty{text-align:center;padding:44px 16px;color:var(--mut);font-size:13px}
+.sec-ttl{font-size:10px;font-weight:900;letter-spacing:1.5px;color:var(--sub);text-transform:uppercase;margin-bottom:8px}
+.chip{background:var(--ad);color:var(--acc);border:1px solid var(--ag);border-radius:20px;padding:2px 7px;font-size:10px;font-weight:700;font-family:ui-monospace,monospace}
+.info-row{display:flex;justify-content:space-between;font-size:12px;padding:5px 0;border-bottom:1px solid var(--b);color:var(--sub)}
+.info-row:last-child{border-bottom:none}
+.info-val{color:var(--txt);font-weight:600;font-family:ui-monospace,monospace}
+.settings-sec{background:var(--card);border-radius:var(--r);padding:12px;margin-bottom:10px;border:1px solid var(--b)}
+.settings-ttl{font-size:10px;font-weight:900;color:var(--acc);margin-bottom:9px;letter-spacing:.5px;text-transform:uppercase}
+.gate{display:flex;align-items:center;justify-content:center;min-height:100dvh;color:var(--sub);font-size:13px}
+</style>
+</head>
+<body>
+<div id="gate" class="gate">בודק הרשאות...</div>
+<div id="root" style="display:none"></div>
+
+<script>
+// ── Auth gate: verify session cookie before showing anything ──────────────
+(async () => {
+  try {
+    const res = await fetch('/api/verify');
+    if (!res.ok) { window.location.href = '/login.html'; return; }
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('root').style.display = 'block';
+    initApp();
+  } catch {
+    window.location.href = '/login.html';
+  }
+})();
+
+function initApp(){
+
+// ── Firebase config ─────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyDg6ts1rjIqJC1i1kmFMzfje_ptJBMxZY8",
+  authDomain: "wh-storage.firebaseapp.com",
+  databaseURL: "https://wh-storage-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "wh-storage",
+  storageBucket: "wh-storage.firebasestorage.app",
+  messagingSenderId: "444682154625",
+  appId: "1:444682154625:web:72ef679b1d3f12693bd380"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const auth = firebase.auth();
+
+// ── מבנה המחסן ───────────────────────────────────────────────────────────────
+const AISLES  = ["ZA","ZB","ZC","ZD","ZE","ZF","ZG","ZH","ZI"];
+const CUBES   = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16];
+const FLOORS  = [1,2,3,4,5,6,7,8,9,10,11];
+const WALKWAY = [4,11];
+const p2 = n => String(n).padStart(2,"0");
+const cubeFloors = c => FLOORS.filter(f => !WALKWAY.includes(c) || f >= 5);
+
+const ALL_POS = (() => {
+  const out = [];
+  AISLES.forEach(a => CUBES.forEach(c => cubeFloors(c).forEach(f =>
+    [1,2,3].forEach(p => out.push(`${a}${c}-${p2(f)}-${p2(p)}`))
+  )));
+  return out;
+})();
+const POS_BC     = Object.fromEntries(ALL_POS.map((pos,i) => [pos, "P"+String(i+1).padStart(5,"0")]));
+const POS_BC_REV = Object.fromEntries(ALL_POS.map((pos,i) => ["P"+String(i+1).padStart(5,"0"), pos]));
+
+const fmtD  = d => new Date(d).toLocaleDateString("he-IL");
+const fmtDT = d => new Date(d).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
+const fkey  = s => s.replace(/[.#$\/\[\]]/g,'-');
+const mkId  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+
+// ── מצב גלובלי ───────────────────────────────────────────────────────────────
+let data = {};   // { posId: {sku,name,qty,unit,note,updatedAt} }
+let movs = [];    // array of movement log entries
+let tab = "map";
+let mAisle=null, mCube=null, mPos=null;
+let scanVal="", scanPos=null, scanErr="";
+let editing=false, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
+let clearPos=null;
+let sq="";
+let toastTimer=null;
+
+const root = document.getElementById('root');
+
+function notify(msg, type){
+  let el = document.getElementById('toast');
+  if(el) el.remove();
+  el = document.createElement('div');
+  el.id='toast';
+  el.className='toast'+(type==='warn'?' warn':'');
+  el.textContent=msg;
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el.remove(),2500);
+}
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── Firebase listeners ────────────────────────────────────────────────────────
+let listenersStarted=false;
+function startListeners(){
+  if(listenersStarted) return;
+  listenersStarted=true;
+  db.ref('positions').on('value', snap=>{
+    data = snap.val() || {};
+    render();
+  });
+  db.ref('movements').on('value', snap=>{
+    const raw = snap.val() || {};
+    movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts)).slice(0,500);
+    render();
+  });
+}
+auth.onAuthStateChanged(user=>{ if(user) startListeners(); });
+auth.signInAnonymously().catch(err=>{
+  console.error('Anonymous auth failed', err);
+  notify('שגיאת התחברות לשרת — נסי לרענן','error');
+});
+
+// ── פעולות נתונים ────────────────────────────────────────────────────────────
+async function doSave(posId){
+  if(!fSKU.trim() || !fQty) return;
+  const qty = parseInt(fQty); if(isNaN(qty)||qty<=0) return;
+  const prev = data[posId];
+  const entry = { sku:fSKU.trim().toUpperCase(), name:fName.trim(), qty, unit:fUnit, note:fNote.trim(), updatedAt:new Date().toISOString() };
+  await db.ref('positions/'+fkey(posId)).set(entry);
+  await db.ref('movements/'+mkId()).set({
+    ts:new Date().toISOString(), pos:posId,
+    type: prev ? 'edit' : 'in',
+    sku: entry.sku, qty: entry.qty, unit: entry.unit,
+    prev: prev ? `${prev.sku} × ${prev.qty}` : null
+  });
+  notify('✓ '+posId+' עודכן — '+entry.sku);
+  editing=false;
+  render();
+}
+
+async function doClear(posId){
+  const prev = data[posId];
+  await db.ref('positions/'+fkey(posId)).remove();
+  if(prev){
+    await db.ref('movements/'+mkId()).set({
+      ts:new Date().toISOString(), pos:posId, type:'out', sku:prev.sku, qty:prev.qty, unit:prev.unit
+    });
+  }
+  clearPos=null; editing=false;
+  notify('✓ '+posId+' נוקה');
+  render();
+}
+
+function openEdit(posId){
+  const d = data[posId];
+  fSKU = d?.sku||''; fName = d?.name||''; fQty = d?.qty?String(d.qty):''; fUnit = d?.unit||'יחידות'; fNote = d?.note||'';
+  editing = true;
+  render();
+  setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
+}
+
+function doScan(val){
+  const v = (val||'').trim().toUpperCase(); if(!v) return;
+  scanErr='';
+  if(POS_BC_REV[v]){ openPos(POS_BC_REV[v]); scanVal=''; render(); return; }
+  if(POS_BC[v]){ openPos(v); scanVal=''; render(); return; }
+  scanErr = 'לא נמצא ברקוד: "'+v+'"';
+  scanVal='';
+  render();
+}
+function openPos(posId){ scanPos=posId; editing=false; }
+function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editing=false; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
+
+function printLabels(aisle, cube, floor){
+  let positions = ALL_POS;
+  if(floor!==undefined) positions = [`${aisle}${cube}-${p2(floor)}-01`,`${aisle}${cube}-${p2(floor)}-02`,`${aisle}${cube}-${p2(floor)}-03`];
+  else if(cube!==undefined) positions = ALL_POS.filter(p=>p.startsWith(`${aisle}${cube}-`));
+  else if(aisle) positions = ALL_POS.filter(p=>p.startsWith(aisle));
+  positions = positions.slice(0,500);
+  const w = window.open('','_blank');
+  w.document.write('<html><head><link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+128+Text&display=swap" rel="stylesheet"/>'+
+    '<style>body{font-family:sans-serif;padding:8px;background:#fff}.g{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}'+
+    '.l{border:1.5px solid #111;border-radius:5px;padding:7px;text-align:center;break-inside:avoid}'+
+    '.i{font-family:monospace;font-size:11px;font-weight:900;letter-spacing:1px}'+
+    '.b{font-family:"Libre Barcode 128 Text",monospace;font-size:36px;line-height:1.1;display:block}'+
+    '@media print{body{padding:2px}.g{gap:3px}}</style></head><body><div class="g">'+
+    positions.map(pos=>`<div class="l"><div class="i">${pos}</div><span class="b">${POS_BC[pos]}</span></div>`).join('')+
+    '</div><script>window.onload=()=>setTimeout(()=>window.print(),700)<\/script></body></html>');
+  w.document.close();
+}
+
+// ── רינדור ───────────────────────────────────────────────────────────────────
+function renderPosView(posId){
+  const d = data[posId];
+  const bc = POS_BC[posId];
+  const m = posId.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
+  const aisle=m?m[1]:'', cube=m?m[2]:'', floor=m?parseInt(m[3]):0, pos=m?parseInt(m[4]):0;
+
+  let html = `<div class="pos-view">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+      <div>
+        <div class="pos-view-id">${posId}</div>
+        <div class="pos-view-sub">מעבר ${aisle} · קובייה ${cube} · קומה ${floor} · עמדה ${pos}</div>
+      </div>
+      <button class="btn btn-blue btn-sm" onclick="printLabels('${aisle}','${cube}',${floor})">🖨 מדבקות קומה</button>
+    </div>
+    <div class="pos-content">`;
+
+  if(d){
+    html += `<div class="pos-sku">${esc(d.sku)}</div>
+      ${d.name?`<div class="pos-name">${esc(d.name)}</div>`:''}
+      <div style="display:flex;align-items:baseline;gap:6px;margin-top:6px">
+        <div class="pos-qty">${Number(d.qty).toLocaleString()}</div>
+        <div class="pos-unit">${esc(d.unit)}</div>
+      </div>
+      ${d.note?`<div style="font-size:11px;color:var(--sub);margin-top:4px">${esc(d.note)}</div>`:''}
+      <div class="pos-date">עודכן: ${fmtD(d.updatedAt)}</div>`;
+  } else {
+    html += `<div class="pos-empty">עמדה ריקה</div>`;
+  }
+
+  html += `</div>
+    <div style="display:flex;gap:7px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn btn-p" onclick="openEditGlobal('${posId}')">${d?'ערוך':'הכנס דגם'}</button>
+      ${d?`<button class="btn btn-d btn-sm" onclick="askClear('${posId}')">נקה עמדה</button>`:''}
+    </div>
+  </div>`;
+
+  if(editing){
+    html += `<div class="edit-form" style="margin-top:10px">
+      <div class="edit-title">${d?'עדכון פרטים':'הכנסת דגם'} — ${posId}</div>
+      <div class="fg">
+        <label class="flbl">SKU / דגם</label>
+        <input id="f-sku" class="finp" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
+      </div>
+      <div class="fg">
+        <label class="flbl">שם מוצר (אופציונלי)</label>
+        <input class="finp rtl" placeholder="חולצה שחורה M..." value="${esc(fName)}" oninput="setFName(this.value)">
+      </div>
+      <div class="frow">
+        <div class="fg">
+          <label class="flbl">כמות</label>
+          <input class="finp" type="number" min="1" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
+            oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter'&&fSKU&&fQty)doSave('${posId}')" style="font-size:16px">
+        </div>
+        <div class="fg">
+          <label class="flbl">יחידה</label>
+          <select class="finp rtl" onchange="setFUnit(this.value)">
+            <option ${fUnit==='יחידות'?'selected':''}>יחידות</option>
+            <option ${fUnit==='זוגות'?'selected':''}>זוגות</option>
+            <option ${fUnit==='קרטון'?'selected':''}>קרטון</option>
+            <option ${fUnit==='ק"ג'?'selected':''}>ק"ג</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg">
+        <label class="flbl">הערה</label>
+        <input class="finp rtl" placeholder="עונה, צבע, מידה..." value="${esc(fNote)}" oninput="setFNote(this.value)">
+      </div>
+      <div style="display:flex;gap:7px">
+        <button class="btn btn-g" style="flex:1" onclick="cancelEdit()">ביטול</button>
+        <button class="btn btn-p" style="flex:1" onclick="doSave('${posId}')" ${(!fSKU.trim()||!fQty)?'disabled':''}>שמור</button>
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+function hdrLabel(){
+  if(tab==='map'){
+    if(mPos) return `<span class="bk" onclick="backFromPos()">&#8592; חזרה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${mPos}</span>`;
+    if(mCube) return `<span class="bk" onclick="backCube()">&#8592; ${mAisle}</span><span>קובייה ${mCube}</span>`;
+    if(mAisle) return `<span class="bk" onclick="backAisle()">&#8592; מפה</span><span>מעבר ${mAisle}</span>`;
+    return 'מפת אחסנה';
+  }
+  if(tab==='scan' && scanPos){
+    return `<span class="bk" onclick="resetScan()">&#8592; סריקה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${scanPos}</span>`;
+  }
+  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות'}[tab]||'';
+}
+
+function render(){
+  const usedCount = Object.keys(data).length;
+  const totalCount = ALL_POS.length;
+  const uniqSKUs = new Set(Object.values(data).map(d=>d.sku)).size;
+
+  let contentHtml = '';
+
+  if(tab==='map' && !mAisle){
+    const tiles = AISLES.map(a=>{
+      const positions = ALL_POS.filter(pos=>pos.startsWith(a));
+      const used = positions.filter(pos=>data[pos]).length;
+      const pct = Math.min(100, Math.round(used/positions.length*100));
+      return `<div class="tile" onclick="setAisle('${a}')">
+        <div class="tile-name">${a}</div>
+        <div class="tile-sub">${used}/${positions.length}</div>
+        <div class="fill-bar"><div class="fill-inner" style="width:${pct}%"></div></div>
+      </div>`;
+    }).join('');
+    contentHtml = `
+      <div class="stats">
+        <div class="stat"><div class="stat-n">${usedCount}</div><div class="stat-l">תפוסים</div></div>
+        <div class="stat"><div class="stat-n">${totalCount-usedCount}</div><div class="stat-l">פנויים</div></div>
+        <div class="stat"><div class="stat-n">${uniqSKUs}</div><div class="stat-l">דגמים</div></div>
+        <div class="stat"><div class="stat-n">${totalCount?Math.round(usedCount/totalCount*100):0}%</div><div class="stat-l">תפוסה</div></div>
+      </div>
+      <div class="sec-ttl">מעברים</div>
+      <div class="grid3">${tiles}</div>`;
+  }
+  else if(tab==='map' && mAisle && !mCube && !mPos){
+    const rows = CUBES.map(c=>{
+      const positions = ALL_POS.filter(pos=>pos.startsWith(`${mAisle}${c}-`));
+      const used = positions.filter(pos=>data[pos]).length;
+      return `<div class="row" onclick="setCube(${c})">
+        <div class="row-id">קובייה ${c}</div>
+        <div style="flex:1">
+          <div class="row-meta">${used}/${positions.length} עמדות תפוסות</div>
+          ${WALKWAY.includes(c)?'<div style="font-size:9px;color:var(--blue)">מעבר רגלי — קומות 5-11</div>':''}
+        </div>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);flex-shrink:0"><polyline points="15 18 9 12 15 6"/></svg>
+      </div>`;
+    }).join('');
+    contentHtml = `<div class="list">${rows}</div>`;
+  }
+  else if(tab==='map' && mAisle && mCube && !mPos){
+    const rows = cubeFloors(mCube).map(f=>{
+      const positions = [`${mAisle}${mCube}-${p2(f)}-01`,`${mAisle}${mCube}-${p2(f)}-02`,`${mAisle}${mCube}-${p2(f)}-03`];
+      const used = positions.filter(p=>data[p]).length;
+      const boxes = positions.map(pid=>{
+        const d = data[pid];
+        const posNum = pid.slice(-2);
+        return `<div onclick="setPos('${pid}')"
+          style="flex:1;background:${d?'var(--ad)':'var(--surf)'};border:1px solid ${d?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
+          <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}</div>
+          ${d?`<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(d.sku)}</div><div style="font-size:10px;color:var(--sub)">${d.qty} ${esc(d.unit)}</div>`:'<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>'}
+        </div>`;
+      }).join('');
+      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="row-id">קומה ${p2(f)}</div>
+          <div class="row-meta">${used}/3 תפוסות</div>
+        </div>
+        <div style="display:flex;gap:5px">${boxes}</div>
+      </div>`;
+    }).join('');
+    contentHtml = `<div class="list">${rows}</div>`;
+  }
+  else if(tab==='map' && mPos){
+    contentHtml = renderPosView(mPos);
+  }
+  else if(tab==='scan' && !scanPos){
+    contentHtml = `<div class="fsec">
+      <div class="sec-ttl">סרוק ברקוד עמדה</div>
+      <input id="scan-input" class="scan-inp" placeholder="P00001..." value="${esc(scanVal)}"
+        oninput="setScanVal(this.value);this.value=scanVal"
+        onkeydown="if(event.key==='Enter')doScan(scanVal)" autocomplete="off">
+      <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:5px">סרוק את הברקוד שעל המדף הפיזי</div>
+      ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
+      <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan(scanVal)" ${!scanVal.trim()?'disabled':''}>פתח עמדה</button>
+    </div>`;
+  }
+  else if(tab==='scan' && scanPos){
+    contentHtml = renderPosView(scanPos);
+  }
+  else if(tab==='search'){
+    const results = sq.length>=2 ? Object.entries(data).filter(([,d])=>
+      d.sku.includes(sq.toUpperCase()) || (d.name||'').toLowerCase().includes(sq.toLowerCase())
+    ) : [];
+    contentHtml = `<div class="fg" style="margin-bottom:11px">
+      <input id="search-input" class="finp rtl" placeholder="חפש דגם / SKU..." value="${esc(sq)}"
+        oninput="setSQ(this.value)" style="font-size:15px;padding:10px 11px">
+    </div>`;
+    if(sq.length>=2 && results.length===0) contentHtml += `<div class="empty">לא נמצאו תוצאות עבור "${esc(sq)}"</div>`;
+    contentHtml += results.map(([posId,d])=>`
+      <div class="sr" onclick="goToPosFromSearch('${posId}')">
+        <div style="flex:1;min-width:0">
+          <div style="font-family:monospace;font-size:11px;font-weight:900;color:var(--acc)">${esc(d.sku)}</div>
+          ${d.name?`<div style="font-size:11px;margin-top:1px">${esc(d.name)}</div>`:''}
+          <div style="font-size:11px;color:var(--sub);margin-top:1px">${d.qty} ${esc(d.unit)}</div>
+          <div style="font-size:10px;color:var(--mut);font-family:monospace;margin-top:1px">${posId} · ${POS_BC[posId]}</div>
+        </div>
+      </div>`).join('');
+    if(!sq) contentHtml += `<div style="font-size:12px;color:var(--mut);text-align:center;margin-top:32px">הקלד שם דגם או SKU לחיפוש</div>`;
+  }
+  else if(tab==='log'){
+    if(!movs.length){
+      contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
+    } else {
+      contentHtml = `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${movs.length} תנועות</div>` +
+        movs.map(m=>`<div class="mov">
+          <div class="mov-ic ${m.type==='in'?'in':m.type==='out'?'out':'edit'}">${m.type==='in'?'↓':m.type==='out'?'↑':'✎'}</div>
+          <div style="flex:1">
+            <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">${esc(m.pos)}</div>
+            <div style="font-size:11px;color:var(--sub);margin-top:1px">
+              ${m.type==='in'?'הוכנס':m.type==='out'?'הוצא':'עודכן'} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+              ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
+            </div>
+            <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}</div>
+          </div>
+        </div>`).join('');
+    }
+  }
+  else if(tab==='settings'){
+    contentHtml = `
+      <div class="settings-sec">
+        <div class="settings-ttl">מבנה המחסן</div>
+        <div class="info-row"><span>מעברים</span><span class="info-val">ZA–ZI (9)</span></div>
+        <div class="info-row"><span>קוביות לכל מעבר</span><span class="info-val">16</span></div>
+        <div class="info-row"><span>קומות (רגיל)</span><span class="info-val">1–11</span></div>
+        <div class="info-row"><span>קומות (קוביות 4 ו-11)</span><span class="info-val">5–11 בלבד</span></div>
+        <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3</span></div>
+        <div class="info-row"><span>סה"כ עמדות</span><span class="info-val">4,536</span></div>
+      </div>
+      <div class="settings-sec">
+        <div class="settings-ttl">נתונים</div>
+        <div class="info-row"><span>עמדות תפוסות</span><span class="info-val">${usedCount} / ${totalCount}</span></div>
+        <div class="info-row"><span>דגמים שונים</span><span class="info-val">${uniqSKUs}</span></div>
+        <div class="info-row"><span>תנועות ביומן</span><span class="info-val">${movs.length}</span></div>
+      </div>
+      <div class="settings-sec">
+        <div class="settings-ttl">הדפסת מדבקות ברקוד</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">הדפסה לפי מעבר — עד 500 מדבקות בפעם</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${AISLES.map(a=>`<button class="btn btn-blue btn-sm" onclick="printLabels('${a}')">מעבר ${a}</button>`).join('')}
+          <button class="btn btn-p btn-sm" onclick="printLabels()">הכל</button>
+        </div>
+      </div>`;
+  }
+
+  root.innerHTML = `
+    <div class="app" dir="rtl">
+      <div class="hdr">
+        <div class="hdr-t">${hdrLabel()}</div>
+        <button class="logout-btn" onclick="window.location.href='/api/logout'">🚪 יציאה</button>
+        <div class="badge">ADDICT WH</div>
+      </div>
+      <div class="content">${contentHtml}</div>
+      <nav class="nav">
+        ${navBtn('map','מפה','<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>')}
+        ${navBtn('scan','סריקה','<rect x="2" y="4" width="3" height="4" rx=".5"/><rect x="9.5" y="4" width="3" height="4" rx=".5"/><rect x="17" y="4" width="3" height="4" rx=".5"/><rect x="2" y="11" width="18" height="2" rx=".5"/><rect x="2" y="16" width="3" height="4" rx=".5"/><rect x="9.5" y="16" width="3" height="4" rx=".5"/><rect x="17" y="16" width="3" height="4" rx=".5"/>')}
+        ${navBtn('search','חיפוש','<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>')}
+        ${navBtn('log','יומן','<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>')}
+        ${navBtn('settings','הגדרות','<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>')}
+      </nav>
+    </div>`;
+
+  // Restore focus for inputs that lose it on re-render
+  if(tab==='search'){
+    const el=document.getElementById('search-input');
+    if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+  if(tab==='scan' && !scanPos){
+    const el=document.getElementById('scan-input');
+    if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+}
+
+function navBtn(id,lbl,svgInner){
+  return `<button class="nb ${tab===id?'on':''}" onclick="switchTab('${id}')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">${svgInner}</svg>${lbl}
+  </button>`;
+}
+
+function switchTab(id){
+  if(id!==tab){
+    editing=false;
+    if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
+    if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
+  }
+  tab=id;
+  render();
+  if(id==='scan') setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},100);
+}
+
+// Expose functions used by inline onclick handlers
+// (inline onclick runs in global scope, so all state mutation must go through
+// these window-level wrapper functions rather than direct variable assignment)
+window.openEditGlobal = openEdit;
+window.askClear = (posId)=>{
+  if(confirm('לנקות את העמדה '+posId+'?')){ doClear(posId); }
+};
+window.doSave = doSave;
+window.doScan = doScan;
+window.resetScan = resetScan;
+window.printLabels = printLabels;
+window.switchTab = switchTab;
+window.render = render;
+window.setAisle = (a)=>{ mAisle=a; render(); };
+window.setCube = (c)=>{ mCube=c; render(); };
+window.setPos = (p)=>{ mPos=p; editing=false; render(); };
+window.backCube = ()=>{ mCube=null; render(); };
+window.backAisle = ()=>{ mAisle=null; render(); };
+window.backFromPos = ()=>{ mPos=null; editing=false; render(); };
+window.cancelEdit = ()=>{ editing=false; render(); };
+window.setFSKU = (v)=>{ fSKU = v.toUpperCase(); };
+window.setFName = (v)=>{ fName = v; };
+window.setFQty = (v)=>{ fQty = v; };
+window.setFUnit = (v)=>{ fUnit = v; };
+window.setFNote = (v)=>{ fNote = v; };
+window.setScanVal = (v)=>{ scanVal = v.toUpperCase(); scanErr=''; };
+window.setSQ = (v)=>{ sq = v; render(); };
+window.goToPosFromSearch = (posId)=>{ tab='map'; mPos=posId; editing=false; render(); };
+
+render();
+
+} // end initApp
+</script>
+</body>
+</html>
