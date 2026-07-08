@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -209,8 +210,9 @@ auth.signInAnonymously().catch(err=>{
 
 // ── פעולות נתונים ────────────────────────────────────────────────────────────
 async function doSave(posId){
-  if(!fSKU.trim() || !fQty) return;
-  const qty = parseInt(fQty); if(isNaN(qty)||qty<=0) return;
+  if(!fSKU.trim()){ notify('חובה להזין SKU / דגם','warn'); return; }
+  const qty = parseInt(fQty);
+  if(isNaN(qty)||qty<=0){ notify('חובה להזין כמות תקינה','warn'); return; }
   const prev = data[posId];
   const entry = { sku:fSKU.trim().toUpperCase(), name:fName.trim(), qty, unit:fUnit, note:fNote.trim(), updatedAt:new Date().toISOString() };
   await db.ref('positions/'+fkey(posId)).set(entry);
@@ -258,6 +260,30 @@ function doScan(val){
 function openPos(posId){ scanPos=posId; editing=false; }
 function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editing=false; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
 
+function exportToExcel(){
+  const rows = ALL_POS.filter(pos=>data[pos]).map(pos=>{
+    const d = data[pos];
+    return {
+      'מיקום': pos,
+      'ברקוד': POS_BC[pos],
+      'SKU': d.sku,
+      'שם מוצר': d.name||'',
+      'כמות': d.qty,
+      'יחידה': d.unit,
+      'הערה': d.note||'',
+      'עודכן': fmtD(d.updatedAt)
+    };
+  });
+  if(rows.length===0){ notify('אין נתונים לייצוא','warn'); return; }
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = Object.keys(rows[0]).map(k=>({wch:Math.max(k.length,14)}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'מלאי מחסן');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `מלאי_מחסן_${stamp}.xlsx`);
+  notify('✓ יוצאו '+rows.length+' עמדות לאקסל');
+}
+
 function printLabels(aisle, cube, floor){
   let positions = ALL_POS;
   if(floor!==undefined) positions = [`${aisle}${cube}-${p2(floor)}-01`,`${aisle}${cube}-${p2(floor)}-02`,`${aisle}${cube}-${p2(floor)}-03`];
@@ -288,6 +314,7 @@ function renderPosView(posId){
       <div>
         <div class="pos-view-id">${posId}</div>
         <div class="pos-view-sub">מעבר ${aisle} · קובייה ${cube} · קומה ${floor} · עמדה ${pos}</div>
+        ${bc?`<div style="font-family:monospace;font-size:12px;color:var(--acc);font-weight:800;margin-top:6px;letter-spacing:1px">🏷 ${bc}</div>`:''}
       </div>
       <button class="btn btn-blue btn-sm" onclick="printLabels('${aisle}','${cube}',${floor})">🖨 מדבקות קומה</button>
     </div>
@@ -346,7 +373,7 @@ function renderPosView(posId){
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelEdit()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="doSave('${posId}')" ${(!fSKU.trim()||!fQty)?'disabled':''}>שמור</button>
+        <button class="btn btn-p" style="flex:1" onclick="doSave('${posId}')">שמור</button>
       </div>
     </div>`;
   }
@@ -392,7 +419,8 @@ function render(){
         <div class="stat"><div class="stat-n">${totalCount?Math.round(usedCount/totalCount*100):0}%</div><div class="stat-l">תפוסה</div></div>
       </div>
       <div class="sec-ttl">מעברים</div>
-      <div class="grid3">${tiles}</div>`;
+      <div class="grid3">${tiles}</div>
+      <button class="btn btn-blue btn-w" onclick="exportToExcel()" style="margin-top:4px">📥 ייצוא מלאי לאקסל</button>`;
   }
   else if(tab==='map' && mAisle && !mCube && !mPos){
     const rows = CUBES.map(c=>{
@@ -503,6 +531,7 @@ function render(){
         <div class="info-row"><span>עמדות תפוסות</span><span class="info-val">${usedCount} / ${totalCount}</span></div>
         <div class="info-row"><span>דגמים שונים</span><span class="info-val">${uniqSKUs}</span></div>
         <div class="info-row"><span>תנועות ביומן</span><span class="info-val">${movs.length}</span></div>
+        <button class="btn btn-blue btn-w" onclick="exportToExcel()" style="margin-top:10px">📥 ייצוא מלאי לאקסל</button>
       </div>
       <div class="settings-sec">
         <div class="settings-ttl">הדפסת מדבקות ברקוד</div>
@@ -570,6 +599,7 @@ window.doSave = doSave;
 window.doScan = doScan;
 window.resetScan = resetScan;
 window.printLabels = printLabels;
+window.exportToExcel = exportToExcel;
 window.switchTab = switchTab;
 window.render = render;
 window.setAisle = (a)=>{ mAisle=a; render(); };
