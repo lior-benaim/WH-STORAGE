@@ -172,6 +172,7 @@ let scanVal="", scanPos=null, scanErr="";
 let editing=false, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
 let clearPos=null;
 let sq="";
+let searchSelected=new Set(); // positions selected for bulk removal on the search page
 let toastTimer=null;
 
 const root = document.getElementById('root');
@@ -253,6 +254,40 @@ function openEdit(posId){
   setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
 }
 
+function toggleSearchSelect(posId){
+  if(searchSelected.has(posId)) searchSelected.delete(posId);
+  else searchSelected.add(posId);
+  render();
+}
+
+function toggleSelectAllSearch(checked){
+  const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
+  const currentResults = Object.entries(data).filter(([,d])=>
+    d.sku.includes(qUp) || (d.name||'').toLowerCase().includes(qLow)
+  );
+  currentResults.forEach(([posId])=>{
+    if(checked) searchSelected.add(posId); else searchSelected.delete(posId);
+  });
+  render();
+}
+
+async function bulkRemoveSelected(){
+  if(searchSelected.size===0) return;
+  const count = searchSelected.size;
+  for(const posId of Array.from(searchSelected)){
+    const prev = data[posId];
+    await db.ref('positions/'+fkey(posId)).remove();
+    if(prev){
+      await db.ref('movements/'+mkId()).set({
+        ts:new Date().toISOString(), pos:posId, type:'out', sku:prev.sku, qty:prev.qty, unit:prev.unit
+      });
+    }
+  }
+  searchSelected = new Set();
+  notify(`✓ הוצאו ${count} עמדות מהמחסן`);
+  render();
+}
+
 function doScan(val){
   const v = (val||'').trim().toUpperCase(); if(!v) return;
   scanErr='';
@@ -280,8 +315,15 @@ async function importSeedData(){
   notify(`✓ יובאו ${imported} עמדות${skipped?` · דולגו ${skipped} (כבר מלאות)`:''}`);
 }
 
-function exportToExcel(){
-  const rows = ALL_POS.filter(pos=>data[pos]).map(pos=>{
+function exportToExcel(searchOnly){
+  let positions;
+  if(searchOnly && sq.length>=2){
+    const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
+    positions = ALL_POS.filter(pos => data[pos] && (data[pos].sku.includes(qUp) || (data[pos].name||'').toLowerCase().includes(qLow)));
+  } else {
+    positions = ALL_POS.filter(pos=>data[pos]);
+  }
+  const rows = positions.map(pos=>{
     const d = data[pos];
     return {
       'מיקום': pos,
@@ -501,21 +543,48 @@ function render(){
     const results = sq.length>=2 ? Object.entries(data).filter(([,d])=>
       d.sku.includes(sq.toUpperCase()) || (d.name||'').toLowerCase().includes(sq.toLowerCase())
     ) : [];
+    const totalQty = results.reduce((s,[,d])=>s+Number(d.qty||0),0);
+    const allSelected = results.length>0 && results.every(([posId])=>searchSelected.has(posId));
+
     contentHtml = `<div class="fg" style="margin-bottom:11px">
       <input id="search-input" class="finp rtl" placeholder="חפש דגם / SKU..." value="${esc(sq)}"
         oninput="setSQ(this.value)" style="font-size:15px;padding:10px 11px">
     </div>`;
+
     if(sq.length>=2 && results.length===0) contentHtml += `<div class="empty">לא נמצאו תוצאות עבור "${esc(sq)}"</div>`;
-    contentHtml += results.map(([posId,d])=>`
-      <div class="sr" onclick="goToPosFromSearch('${posId}')">
-        <div style="flex:1;min-width:0">
+
+    if(sq.length>=2 && results.length>0){
+      contentHtml += `<div style="background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:10px 12px;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div style="font-size:12px;color:var(--sub)">סה"כ <b style="color:var(--acc)">${totalQty}</b> קרטונים ב-<b style="color:var(--acc)">${results.length}</b> מיקומים</div>
+        <button class="btn btn-blue btn-sm" onclick="exportToExcel(true)">📥 ייצוא תוצאות</button>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;padding:2px 2px 8px">
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer">
+          <input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAllSearch(this.checked)" style="width:16px;height:16px;cursor:pointer">
+          בחר הכל
+        </label>
+        ${searchSelected.size>0?`<span style="font-size:11px;color:var(--mut);cursor:pointer" onclick="clearSearchSelection()">נקה בחירה (${searchSelected.size})</span>`:''}
+      </div>`;
+    }
+
+    contentHtml += results.map(([posId,d])=>{
+      const checked = searchSelected.has(posId);
+      return `<div class="sr" style="align-items:flex-start">
+        <input type="checkbox" ${checked?'checked':''} onclick="event.stopPropagation();toggleSearchSelect('${posId}')" style="width:16px;height:16px;cursor:pointer;margin-top:2px;flex-shrink:0">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="goToPosFromSearch('${posId}')">
           <div style="font-family:monospace;font-size:11px;font-weight:900;color:var(--acc)">${esc(d.sku)}</div>
           ${d.name?`<div style="font-size:11px;margin-top:1px">${esc(d.name)}</div>`:''}
           <div style="font-size:11px;color:var(--sub);margin-top:1px">${d.qty} ${esc(d.unit)}</div>
           <div style="font-size:10px;color:var(--mut);font-family:monospace;margin-top:1px">${posId} · ${POS_BC[posId]}</div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
+
     if(!sq) contentHtml += `<div style="font-size:12px;color:var(--mut);text-align:center;margin-top:32px">הקלד שם דגם או SKU לחיפוש</div>`;
+
+    if(searchSelected.size>0){
+      contentHtml += `<button class="btn btn-d btn-w" onclick="askBulkRemove()" style="margin-top:10px">🗑 הוצא ${searchSelected.size} עמדות נבחרות מהמחסן</button>`;
+    }
   }
   else if(tab==='log'){
     if(!movs.length){
@@ -625,6 +694,15 @@ window.doScan = doScan;
 window.resetScan = resetScan;
 window.printLabels = printLabels;
 window.exportToExcel = exportToExcel;
+window.toggleSearchSelect = toggleSearchSelect;
+window.toggleSelectAllSearch = toggleSelectAllSearch;
+window.clearSearchSelection = ()=>{ searchSelected = new Set(); render(); };
+window.askBulkRemove = ()=>{
+  if(searchSelected.size===0) return;
+  if(confirm(`להוציא ${searchSelected.size} עמדות מהמחסן? הפעולה תתועד ביומן.`)){
+    bulkRemoveSelected();
+  }
+};
 window.importSeedData = ()=>{
   if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות קיימות לא יידרסו.')){
     importSeedData();
