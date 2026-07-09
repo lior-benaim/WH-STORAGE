@@ -505,7 +505,7 @@ function render(){
     contentHtml = `<div class="list">${rows}</div>`;
   }
   else if(tab==='map' && mAisle && mCube && !mPos){
-    const rows = cubeFloors(mCube, mAisle).map(f=>{
+    const rows = cubeFloors(mCube, mAisle).slice().reverse().map(f=>{
       const positions = [`${mAisle}${mCube}-${p2(f)}-01`,`${mAisle}${mCube}-${p2(f)}-02`,`${mAisle}${mCube}-${p2(f)}-03`];
       const used = positions.filter(p=>data[p]).length;
       const boxes = positions.map(pid=>{
