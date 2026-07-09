@@ -179,6 +179,27 @@ const mkId  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,5
 // ── מצב גלובלי ───────────────────────────────────────────────────────────────
 // data[posId] = { items: { itemId: {sku,name,qty,unit,note,cartonBarcode,updatedAt} } }
 // A position can now hold MULTIPLE items, each with its own carton barcode.
+// ── מחשבון מיקומים ────────────────────────────────────────────────────────────
+// Physical dimensions of a single shelf position (cm)
+const SHELF = { depth:80, width:195, height:50 };
+// Carton types with fixed placement orientation:
+//   carton length  → across shelf width  (side by side)
+//   carton height  → across shelf depth  (front-to-back rows)
+//   carton width   → across shelf height (stacked layers)
+const CARTON_TYPES = {
+  "לבן קטן":  { h:35, w:42, l:61 },
+  "לבן גדול": { h:41, w:50, l:64 },
+  "חום קטן":  { h:40, w:35, l:52 },
+  "חום גדול": { h:40, w:39, l:59 }
+};
+Object.values(CARTON_TYPES).forEach(c=>{
+  c.perWidth  = Math.floor(SHELF.width  / c.l) || 0;
+  c.perDepth  = Math.floor(SHELF.depth  / c.h) || 0;
+  c.perHeight = Math.floor(SHELF.height / c.w) || 0;
+  c.capacity  = c.perWidth * c.perDepth * c.perHeight;
+});
+let calcRows = [{type:"לבן קטן", qty:""}];
+
 let data = {};
 let movs = [];
 let tab = "map";
@@ -260,6 +281,16 @@ function startListeners(){
   }, err=>{ console.error('movements listener error', err); });
 }
 startListeners();
+
+// ── מחשבון מיקומים ────────────────────────────────────────────────────────────
+function addCalcRow(){ calcRows.push({type:"לבן קטן", qty:""}); render(); }
+function removeCalcRow(idx){
+  calcRows.splice(idx,1);
+  if(calcRows.length===0) calcRows.push({type:"לבן קטן", qty:""});
+  render();
+}
+function setCalcRowType(idx,val){ calcRows[idx].type = val; render(); }
+function setCalcRowQty(idx,val){ calcRows[idx].qty = val; render(); }
 
 // ── פעולות פריטים ────────────────────────────────────────────────────────────
 function openAddItem(posId){
@@ -619,10 +650,14 @@ function hdrLabel(){
   if(tab==='scan' && scanPos){
     return `<span class="bk" onclick="resetScan()">&#8592; סריקה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${scanPos}</span>`;
   }
-  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות'}[tab]||'';
+  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב מיקומים'}[tab]||'';
 }
 
 function render(){
+  const _activeEl = document.activeElement;
+  const _activeId = (_activeEl && _activeEl.id) ? _activeEl.id : null;
+  const _activeSel = (_activeEl && typeof _activeEl.selectionStart === 'number') ? _activeEl.selectionStart : null;
+
   const occupiedPositions = ALL_POS.filter(isOccupied);
   const usedCount = occupiedPositions.length;
   const totalCount = ALL_POS.length;
@@ -775,6 +810,65 @@ function render(){
       contentHtml += `<div style="height:56px"></div>`; // spacer so the floating bulk bar doesn't cover the last row
     }
   }
+  else if(tab==='calc'){
+    contentHtml = `<div class="fsec">
+      <div class="sec-ttl">מידות עמדה בודדת</div>
+      <div class="info-row"><span>עומק</span><span class="info-val">${SHELF.depth} ס"מ</span></div>
+      <div class="info-row"><span>רוחב</span><span class="info-val">${SHELF.width} ס"מ</span></div>
+      <div class="info-row"><span>גובה</span><span class="info-val">${SHELF.height} ס"מ</span></div>
+    </div>`;
+
+    contentHtml += `<div class="sec-ttl">קיבולת לפי סוג קרטון</div>
+      <div class="fsec">` +
+      Object.entries(CARTON_TYPES).map(([name,c])=>
+        `<div class="info-row"><span>${name}</span><span class="info-val">${c.capacity} לעמדה</span></div>`
+      ).join('') +
+      `</div>`;
+
+    contentHtml += `<div class="sec-ttl">חישוב מיקומים נדרשים</div>`;
+
+    calcRows.forEach((row,idx)=>{
+      const c = CARTON_TYPES[row.type];
+      const qty = parseInt(row.qty)||0;
+      const posNeeded = qty>0 ? Math.ceil(qty/c.capacity) : 0;
+      contentHtml += `<div class="fsec">
+        <div class="frow">
+          <div class="fg">
+            <label class="flbl">סוג קרטון</label>
+            <select class="finp rtl" onchange="setCalcRowType(${idx},this.value)">
+              ${Object.keys(CARTON_TYPES).map(t=>`<option ${row.type===t?'selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+          <div class="fg">
+            <label class="flbl">כמות קרטונים</label>
+            <input id="calc-qty-${idx}" class="finp" type="number" min="0" inputmode="numeric" placeholder="0"
+              value="${esc(row.qty)}" oninput="setCalcRowQty(${idx},this.value)" style="font-size:16px">
+          </div>
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">קיבולת לעמדה: <b style="color:var(--acc)">${c.capacity}</b> קרטונים (${c.perWidth} לרוחב × ${c.perDepth} לעומק × ${c.perHeight} לגובה)</div>
+        ${qty>0?`<div style="background:var(--surf);border-radius:var(--rs);padding:10px;text-align:center;margin-bottom:8px">
+          <div style="font-size:26px;font-weight:900;color:var(--acc)">${posNeeded}</div>
+          <div style="font-size:11px;color:var(--sub)">מיקומים נדרשים</div>
+        </div>`:''}
+        ${calcRows.length>1?`<button class="btn btn-d btn-sm btn-w" onclick="removeCalcRow(${idx})">הסר שורה</button>`:''}
+      </div>`;
+    });
+
+    contentHtml += `<button class="btn btn-g btn-w" onclick="addCalcRow()" style="margin-bottom:10px">➕ הוסף סוג קרטון נוסף</button>`;
+
+    const totalQty = calcRows.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
+    const totalPos = calcRows.reduce((s,r)=>{
+      const q=parseInt(r.qty)||0;
+      return s + (q>0 ? Math.ceil(q/CARTON_TYPES[r.type].capacity) : 0);
+    },0);
+    if(totalQty>0){
+      contentHtml += `<div class="fsec" style="text-align:center">
+        <div class="sec-ttl">סה"כ כללי</div>
+        <div style="font-size:34px;font-weight:900;color:var(--acc)">${totalPos}</div>
+        <div style="font-size:12px;color:var(--sub)">מיקומים נדרשים סה"כ (${totalQty} קרטונים)</div>
+      </div>`;
+    }
+  }
   else if(tab==='log'){
     if(!movs.length){
       contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
@@ -853,19 +947,20 @@ function render(){
         ${navBtn('map','מפה','<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>')}
         ${navBtn('scan','סריקה','<rect x="2" y="4" width="3" height="4" rx=".5"/><rect x="9.5" y="4" width="3" height="4" rx=".5"/><rect x="17" y="4" width="3" height="4" rx=".5"/><rect x="2" y="11" width="18" height="2" rx=".5"/><rect x="2" y="16" width="3" height="4" rx=".5"/><rect x="9.5" y="16" width="3" height="4" rx=".5"/><rect x="17" y="16" width="3" height="4" rx=".5"/>')}
         ${navBtn('search','חיפוש','<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>')}
+        ${navBtn('calc','חישוב','<path d="M21.3 8.7 8.7 21.3c-.4.4-1 .4-1.4 0l-4.6-4.6c-.4-.4-.4-1 0-1.4L15.3 2.7c.4-.4 1-.4 1.4 0l4.6 4.6c.4.4.4 1 0 1.4Z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/><path d="m4.5 13.5 2 2"/>')}
         ${navBtn('log','יומן','<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>')}
         ${navBtn('settings','הגדרות','<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>')}
       </nav>
     </div>`;
 
-  // Restore focus for inputs that lose it on re-render
-  if(tab==='search'){
-    const el=document.getElementById('search-input');
-    if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
-  }
-  if(tab==='scan' && !scanPos){
-    const el=document.getElementById('scan-input');
-    if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  // Restore focus generically for whatever input was active before this render
+  // (covers search/scan inputs as well as the dynamic calculator row inputs)
+  if(_activeId){
+    const el = document.getElementById(_activeId);
+    if(el){
+      el.focus();
+      if(_activeSel!=null && el.setSelectionRange){ try{ el.setSelectionRange(_activeSel,_activeSel); }catch{} }
+    }
   }
 
   // Wire up scroll-to-top/bottom button visibility (content div is rebuilt every render)
@@ -969,6 +1064,10 @@ window.openChangeLocation = openChangeLocation;
 window.cancelChangeLocation = cancelChangeLocation;
 window.confirmChangeLocation = confirmChangeLocation;
 window.setNewLocScanVal = (v)=>{ newLocScanVal = v.toUpperCase(); };
+window.addCalcRow = addCalcRow;
+window.removeCalcRow = removeCalcRow;
+window.setCalcRowType = setCalcRowType;
+window.setCalcRowQty = setCalcRowQty;
 
 render();
 
