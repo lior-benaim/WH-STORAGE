@@ -51,12 +51,17 @@ html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkM
 .pos-view-id{font-size:22px;font-weight:900;color:var(--acc);letter-spacing:2px;font-family:ui-monospace,monospace;line-height:1}
 .pos-view-sub{font-size:11px;color:var(--sub);margin-top:3px}
 .pos-content{margin-top:14px}
-.pos-sku{font-size:18px;font-weight:900;color:var(--acc);font-family:ui-monospace,monospace;letter-spacing:1px}
-.pos-name{font-size:14px;margin-top:3px}
-.pos-qty{font-size:28px;font-weight:900;line-height:1;margin-top:6px}
-.pos-unit{font-size:11px;color:var(--sub)}
-.pos-date{font-size:11px;color:var(--sub);margin-top:4px}
 .pos-empty{text-align:center;padding:20px 0;color:var(--mut);font-size:13px}
+.item-card{background:var(--surf);border:1px solid var(--b);border-radius:var(--rs);padding:11px;margin-bottom:8px}
+.item-sku{font-size:15px;font-weight:900;color:var(--acc);font-family:ui-monospace,monospace;letter-spacing:.5px}
+.item-name{font-size:13px;margin-top:2px}
+.item-qty-row{display:flex;align-items:baseline;gap:6px;margin-top:5px}
+.item-qty{font-size:20px;font-weight:900;line-height:1}
+.item-unit{font-size:11px;color:var(--sub)}
+.item-note{font-size:11px;color:var(--sub);margin-top:3px}
+.item-carton{font-size:11px;color:var(--acc);margin-top:3px;font-family:ui-monospace,monospace}
+.item-date{font-size:10px;color:var(--mut);margin-top:3px}
+.item-actions{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
 .edit-form{background:var(--surf);border:1px solid var(--acc);border-radius:var(--rs);padding:12px;margin-top:12px}
 .edit-title{font-size:12px;font-weight:800;color:var(--acc);margin-bottom:10px}
 .fsec{background:var(--card);border-radius:var(--r);padding:12px;margin-bottom:10px;border:1px solid var(--b)}
@@ -172,23 +177,26 @@ const fkey  = s => s.replace(/[.#$\/\[\]]/g,'-');
 const mkId  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 
 // ── מצב גלובלי ───────────────────────────────────────────────────────────────
-let data = {};   // { posId: {sku,name,qty,unit,note,updatedAt} }
-let movs = [];    // array of movement log entries
+// data[posId] = { items: { itemId: {sku,name,qty,unit,note,cartonBarcode,updatedAt} } }
+// A position can now hold MULTIPLE items, each with its own carton barcode.
+let data = {};
+let movs = [];
 let tab = "map";
 let mAisle=null, mCube=null, mPos=null;
 let scanVal="", scanPos=null, scanErr="";
-let editing=false, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
-let clearPos=null;
-let sq="";
-let searchSelected=new Set(); // positions selected for bulk removal on the search page
 
-// ── Carton barcode linking ─────────────────────────────────────────────────
-// The model/SKU is entered manually at the position by the manager first.
-// A worker sent to that position simply scans the shelf barcode (opens the
-// position) + the barcode on the physical carton, then confirms — linking
-// that specific carton to this position for traceability. No pre-registration.
-let assigningCarton=false, cartonScanVal="";
-let changingLocation=false, newLocScanVal="";
+// editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
+let editingItem=null, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
+let clearPos=null;   // {posId, itemId} pending removal confirmation
+let sq="";
+let searchSelected=new Set(); // composite "posId::itemId" keys selected for bulk removal on the search page
+
+// ── Carton barcode linking (per item) ──────────────────────────────────────
+let assigningCartonFor=null, cartonScanVal=""; // assigningCartonFor: {posId,itemId}
+
+// ── Change location (per item) ─────────────────────────────────────────────
+let changingLocationFor=null, newLocScanVal=""; // changingLocationFor: {posId,itemId}
+
 let toastTimer=null;
 
 const root = document.getElementById('root');
@@ -209,17 +217,40 @@ function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Returns [[itemId,item], ...] for a position, or [] if empty/nonexistent
+function itemsOf(posId){
+  const p = data[posId];
+  if(!p || !p.items) return [];
+  return Object.entries(p.items);
+}
+function isOccupied(posId){ return itemsOf(posId).length > 0; }
+
 // ── Firebase listeners ────────────────────────────────────────────────────────
 // Note: access control is handled entirely by the Vercel login (username/password),
-// so we connect directly to Realtime Database without requiring Firebase Anonymous
-// Auth. (Anonymous Auth previously gated this and silently broke data sync when
-// the Anonymous provider wasn't enabled in the Firebase console.)
+// so we connect directly to Realtime Database without requiring Firebase Anonymous Auth.
 let listenersStarted=false;
 function startListeners(){
   if(listenersStarted) return;
   listenersStarted=true;
   db.ref('positions').on('value', snap=>{
-    data = snap.val() || {};
+    const raw = snap.val() || {};
+    const migrated = {};
+    Object.entries(raw).forEach(([posId, val])=>{
+      if(val && val.items){
+        migrated[posId] = val; // already in the new multi-item format
+      } else if(val && val.sku){
+        // Old single-item format — convert on the fly and persist the conversion
+        const itemId = mkId();
+        const converted = { items: { [itemId]: {
+          sku: val.sku, name: val.name||'', qty: val.qty, unit: val.unit,
+          note: val.note||'', cartonBarcode: val.cartonBarcode||null,
+          updatedAt: val.updatedAt || new Date().toISOString()
+        }}};
+        migrated[posId] = converted;
+        db.ref('positions/'+fkey(posId)).set(converted).catch(()=>{});
+      }
+    });
+    data = migrated;
     render();
   }, err=>{ console.error('positions listener error', err); notify('שגיאת חיבור למסד הנתונים','warn'); });
   db.ref('movements').on('value', snap=>{
@@ -230,136 +261,157 @@ function startListeners(){
 }
 startListeners();
 
-// ── פעולות נתונים ────────────────────────────────────────────────────────────
-async function doSave(posId){
-  if(!fSKU.trim()){ notify('חובה להזין SKU / דגם','warn'); return; }
-  const qty = parseInt(fQty);
-  if(isNaN(qty)||qty<=0){ notify('חובה להזין כמות תקינה','warn'); return; }
-  const prev = data[posId];
-  const entry = { sku:fSKU.trim().toUpperCase(), name:fName.trim(), qty, unit:fUnit, note:fNote.trim(), updatedAt:new Date().toISOString() };
-  await db.ref('positions/'+fkey(posId)).set(entry);
-  await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:posId,
-    type: prev ? 'edit' : 'in',
-    sku: entry.sku, qty: entry.qty, unit: entry.unit,
-    prev: prev ? `${prev.sku} × ${prev.qty}` : null
-  });
-  notify('✓ '+posId+' עודכן — '+entry.sku);
-  editing=false;
-  render();
-}
-
-async function doClear(posId){
-  const prev = data[posId];
-  await db.ref('positions/'+fkey(posId)).remove();
-  if(prev){
-    await db.ref('movements/'+mkId()).set({
-      ts:new Date().toISOString(), pos:posId, type:'out', sku:prev.sku, qty:prev.qty, unit:prev.unit
-    });
-  }
-  clearPos=null; editing=false;
-  notify('✓ '+posId+' נוקה');
-  render();
-}
-
-function openEdit(posId){
-  const d = data[posId];
-  fSKU = d?.sku||''; fName = d?.name||''; fQty = d?.qty?String(d.qty):''; fUnit = d?.unit||'יחידות'; fNote = d?.note||'';
-  editing = true;
+// ── פעולות פריטים ────────────────────────────────────────────────────────────
+function openAddItem(posId){
+  fSKU=""; fName=""; fQty=""; fUnit="יחידות"; fNote="";
+  editingItem = {posId, itemId:null};
+  assigningCartonFor=null; changingLocationFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
 }
+function openEditItem(posId, itemId){
+  const item = data[posId]?.items?.[itemId];
+  fSKU = item?.sku||''; fName = item?.name||''; fQty = item?.qty?String(item.qty):''; fUnit = item?.unit||'יחידות'; fNote = item?.note||'';
+  editingItem = {posId, itemId};
+  assigningCartonFor=null; changingLocationFor=null;
+  render();
+  setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
+}
+function cancelEditItem(){ editingItem=null; render(); }
 
-function toggleSearchSelect(posId){
-  if(searchSelected.has(posId)) searchSelected.delete(posId);
-  else searchSelected.add(posId);
+async function doSaveItem(){
+  if(!editingItem) return;
+  const {posId, itemId} = editingItem;
+  if(!fSKU.trim()){ notify('חובה להזין SKU / דגם','warn'); return; }
+  const qty = parseInt(fQty);
+  if(isNaN(qty)||qty<=0){ notify('חובה להזין כמות תקינה','warn'); return; }
+  const id = itemId || mkId();
+  const prevItem = itemId ? data[posId]?.items?.[itemId] : null;
+  const entry = {
+    sku:fSKU.trim().toUpperCase(), name:fName.trim(), qty, unit:fUnit, note:fNote.trim(),
+    cartonBarcode: prevItem?.cartonBarcode || null,
+    updatedAt:new Date().toISOString()
+  };
+  await db.ref(`positions/${fkey(posId)}/items/${id}`).set(entry);
+  await db.ref('movements/'+mkId()).set({
+    ts:new Date().toISOString(), pos:posId,
+    type: prevItem ? 'edit' : 'in',
+    sku: entry.sku, qty: entry.qty, unit: entry.unit,
+    prev: prevItem ? `${prevItem.sku} × ${prevItem.qty}` : null
+  });
+  notify('✓ '+posId+' עודכן — '+entry.sku);
+  editingItem=null;
   render();
 }
 
+async function removeItem(posId, itemId){
+  const item = data[posId]?.items?.[itemId]; if(!item) return;
+  await db.ref(`positions/${fkey(posId)}/items/${itemId}`).remove();
+  const remaining = Object.keys(data[posId]?.items||{}).filter(k=>k!==itemId);
+  if(remaining.length===0){ await db.ref(`positions/${fkey(posId)}`).remove(); }
+  await db.ref('movements/'+mkId()).set({
+    ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit
+  });
+  clearPos=null;
+  notify('✓ '+item.sku+' הוצא מ-'+posId);
+  render();
+}
+
+function toggleSearchSelect(key){
+  if(searchSelected.has(key)) searchSelected.delete(key);
+  else searchSelected.add(key);
+  render();
+}
 function toggleSelectAllSearch(checked){
   const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
-  const currentResults = Object.entries(data).filter(([,d])=>
-    d.sku.includes(qUp) || (d.name||'').toLowerCase().includes(qLow)
-  );
-  currentResults.forEach(([posId])=>{
-    if(checked) searchSelected.add(posId); else searchSelected.delete(posId);
+  Object.keys(data).forEach(posId=>{
+    itemsOf(posId).forEach(([itemId,item])=>{
+      if(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow)){
+        const key = posId+'::'+itemId;
+        if(checked) searchSelected.add(key); else searchSelected.delete(key);
+      }
+    });
   });
   render();
 }
-
 async function bulkRemoveSelected(){
   if(searchSelected.size===0) return;
   const count = searchSelected.size;
-  for(const posId of Array.from(searchSelected)){
-    const prev = data[posId];
-    await db.ref('positions/'+fkey(posId)).remove();
-    if(prev){
-      await db.ref('movements/'+mkId()).set({
-        ts:new Date().toISOString(), pos:posId, type:'out', sku:prev.sku, qty:prev.qty, unit:prev.unit
-      });
-    }
+  for(const key of Array.from(searchSelected)){
+    const [posId,itemId] = key.split('::');
+    const item = data[posId]?.items?.[itemId];
+    if(!item) continue;
+    await db.ref(`positions/${fkey(posId)}/items/${itemId}`).remove();
+    const remaining = Object.keys(data[posId]?.items||{}).filter(k=>k!==itemId);
+    if(remaining.length===0){ await db.ref(`positions/${fkey(posId)}`).remove(); }
+    await db.ref('movements/'+mkId()).set({
+      ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit
+    });
   }
   searchSelected = new Set();
-  notify(`✓ הוצאו ${count} עמדות מהמחסן`);
+  notify(`✓ הוצאו ${count} פריטים מהמחסן`);
   render();
 }
 
-function openCartonAssign(){
-  assigningCarton=true; cartonScanVal=""; editing=false;
+// ── שיוך קרטון (לכל פריט) ───────────────────────────────────────────────────
+function openCartonAssign(posId, itemId){
+  assigningCartonFor = {posId, itemId}; cartonScanVal=""; editingItem=null; changingLocationFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('carton-scan-input'); if(el) el.focus(); }, 60);
 }
-function cancelCartonAssign(){
-  assigningCarton=false; cartonScanVal="";
-  render();
-}
-async function confirmCartonAssign(posId){
+function cancelCartonAssign(){ assigningCartonFor=null; cartonScanVal=""; render(); }
+async function confirmCartonAssign(){
+  if(!assigningCartonFor) return;
+  const {posId, itemId} = assigningCartonFor;
   const bc = (cartonScanVal||'').trim().toUpperCase();
   if(!bc){ notify('חובה לסרוק ברקוד קרטון','warn'); return; }
-  const d = data[posId];
-  if(!d){ notify('יש להזין קודם דגם במיקום','warn'); return; }
-  await db.ref('positions/'+fkey(posId)+'/cartonBarcode').set(bc);
-  await db.ref('positions/'+fkey(posId)+'/updatedAt').set(new Date().toISOString());
+  const item = data[posId]?.items?.[itemId];
+  if(!item){ notify('הפריט לא נמצא','warn'); return; }
+  await db.ref(`positions/${fkey(posId)}/items/${itemId}/cartonBarcode`).set(bc);
+  await db.ref(`positions/${fkey(posId)}/items/${itemId}/updatedAt`).set(new Date().toISOString());
   await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:posId, type:'link', sku:d.sku, qty:d.qty, unit:d.unit, carton:bc
+    ts:new Date().toISOString(), pos:posId, type:'link', sku:item.sku, qty:item.qty, unit:item.unit, carton:bc
   });
   notify(`✓ קרטון ${bc} שויך ל-${posId}`);
-  assigningCarton=false; cartonScanVal="";
+  assigningCartonFor=null; cartonScanVal="";
   render();
 }
 
-function openChangeLocation(){
-  changingLocation=true; newLocScanVal=""; editing=false; assigningCarton=false;
+// ── שינוי מיקום (לכל פריט) ───────────────────────────────────────────────────
+function openChangeLocation(posId, itemId){
+  changingLocationFor = {posId, itemId}; newLocScanVal=""; editingItem=null; assigningCartonFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('new-loc-input'); if(el) el.focus(); }, 60);
 }
-function cancelChangeLocation(){
-  changingLocation=false; newLocScanVal="";
-  render();
-}
-async function confirmChangeLocation(oldPosId){
+function cancelChangeLocation(){ changingLocationFor=null; newLocScanVal=""; render(); }
+async function confirmChangeLocation(){
+  if(!changingLocationFor) return;
+  const {posId:oldPos, itemId} = changingLocationFor;
   const raw = (newLocScanVal||'').trim().toUpperCase();
   if(!raw){ notify('חובה לסרוק / להזין מיקום חדש','warn'); return; }
   let newPos = null;
   if(POS_BC_REV[raw]) newPos = POS_BC_REV[raw];
   else if(POS_BC[raw]) newPos = raw;
   if(!newPos){ notify('מיקום לא נמצא: '+raw,'warn'); return; }
-  if(newPos===oldPosId){ notify('זהו אותו מיקום','warn'); return; }
-  if(data[newPos]){ notify('המיקום החדש תפוס — יש לפנות אותו קודם','warn'); return; }
-  const d = data[oldPosId];
-  if(!d){ notify('אין מה להעביר — המיקום ריק','warn'); return; }
-  await db.ref('positions/'+fkey(newPos)).set({...d, updatedAt:new Date().toISOString()});
-  await db.ref('positions/'+fkey(oldPosId)).remove();
+  if(newPos===oldPos){ notify('זהו אותו מיקום','warn'); return; }
+  const item = data[oldPos]?.items?.[itemId];
+  if(!item){ notify('הפריט לא נמצא','warn'); return; }
+  await db.ref(`positions/${fkey(newPos)}/items/${itemId}`).set({...item, updatedAt:new Date().toISOString()});
+  await db.ref(`positions/${fkey(oldPos)}/items/${itemId}`).remove();
+  const remaining = Object.keys(data[oldPos]?.items||{}).filter(k=>k!==itemId);
+  if(remaining.length===0){ await db.ref(`positions/${fkey(oldPos)}`).remove(); }
   await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:newPos, fromPos:oldPosId, type:'move', sku:d.sku, qty:d.qty, unit:d.unit
+    ts:new Date().toISOString(), pos:newPos, fromPos:oldPos, type:'move', sku:item.sku, qty:item.qty, unit:item.unit,
+    carton: item.cartonBarcode||null
   });
-  notify(`✓ הועבר מ-${oldPosId} ל-${newPos}`);
-  changingLocation=false; newLocScanVal="";
+  notify(`✓ הועבר מ-${oldPos} ל-${newPos}`);
+  changingLocationFor=null; newLocScanVal="";
   if(tab==='map') mPos=newPos;
   if(tab==='scan') scanPos=newPos;
   render();
 }
 
+// ── סריקה ────────────────────────────────────────────────────────────────────
 function doScan(){
   const v = (scanVal||'').trim().toUpperCase(); if(!v) return;
   scanErr='';
@@ -369,44 +421,46 @@ function doScan(){
   scanVal='';
   render();
 }
-function openPos(posId){ scanPos=posId; editing=false; }
-function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editing=false; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
+function openPos(posId){ scanPos=posId; editingItem=null; }
+function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editingItem=null; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
 
+// ── ייבוא נתונים ראשוניים (65 עמדות שהיו לפני עליית המערכת) ───────────────────
 async function importSeedData(){
   const keys = Object.keys(SEED_DATA);
   let imported = 0, skipped = 0;
   for(const posId of keys){
-    if(data[posId]){ skipped++; continue; }
-    await db.ref('positions/'+fkey(posId)).set(SEED_DATA[posId]);
-    await db.ref('movements/'+mkId()).set({
-      ts:new Date().toISOString(), pos:posId, type:'in',
-      sku:SEED_DATA[posId].sku, qty:SEED_DATA[posId].qty, unit:SEED_DATA[posId].unit
-    });
+    if(isOccupied(posId)){ skipped++; continue; }
+    const itemId = mkId();
+    const src = SEED_DATA[posId];
+    const entry = { sku:src.sku, name:src.name||'', qty:src.qty, unit:src.unit, note:src.note||'', cartonBarcode:null, updatedAt:src.updatedAt||new Date().toISOString() };
+    await db.ref(`positions/${fkey(posId)}/items/${itemId}`).set(entry);
+    await db.ref('movements/'+mkId()).set({ ts:new Date().toISOString(), pos:posId, type:'in', sku:entry.sku, qty:entry.qty, unit:entry.unit });
     imported++;
   }
-  notify(`✓ יובאו ${imported} עמדות${skipped?` · דולגו ${skipped} (כבר מלאות)`:''}`);
+  notify(`✓ יובאו ${imported} עמדות${skipped?` · דולגו ${skipped} (כבר תפוסות)`:''}`);
 }
 
+// ── ייצוא לאקסל ────────────────────────────────────────────────────────────
 function exportToExcel(searchOnly){
-  let positions;
-  if(searchOnly && sq.length>=2){
-    const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
-    positions = ALL_POS.filter(pos => data[pos] && (data[pos].sku.includes(qUp) || (data[pos].name||'').toLowerCase().includes(qLow)));
-  } else {
-    positions = ALL_POS.filter(pos=>data[pos]);
-  }
-  const rows = positions.map(pos=>{
-    const d = data[pos];
-    return {
-      'מיקום': pos,
-      'ברקוד': POS_BC[pos],
-      'SKU': d.sku,
-      'שם מוצר': d.name||'',
-      'כמות': d.qty,
-      'יחידה': d.unit,
-      'הערה': d.note||'',
-      'עודכן': fmtD(d.updatedAt)
-    };
+  const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
+  const rows = [];
+  ALL_POS.forEach(pos=>{
+    itemsOf(pos).forEach(([itemId,item])=>{
+      if(searchOnly && sq.length>=2){
+        if(!(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow))) return;
+      }
+      rows.push({
+        'מיקום': pos,
+        'ברקוד מדף': POS_BC[pos],
+        'SKU': item.sku,
+        'שם מוצר': item.name||'',
+        'כמות': item.qty,
+        'יחידה': item.unit,
+        'הערה': item.note||'',
+        'ברקוד קרטון': item.cartonBarcode||'',
+        'עודכן': fmtD(item.updatedAt)
+      });
+    });
   });
   if(rows.length===0){ notify('אין נתונים לייצוא','warn'); return; }
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -415,7 +469,7 @@ function exportToExcel(searchOnly){
   XLSX.utils.book_append_sheet(wb, ws, 'מלאי מחסן');
   const stamp = new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb, `מלאי_מחסן_${stamp}.xlsx`);
-  notify('✓ יוצאו '+rows.length+' עמדות לאקסל');
+  notify('✓ יוצאו '+rows.length+' פריטים לאקסל');
 }
 
 function printLabels(aisle, cube, floor){
@@ -423,7 +477,6 @@ function printLabels(aisle, cube, floor){
   if(floor!==undefined) positions = [`${aisle}${cube}-${p2(floor)}-01`,`${aisle}${cube}-${p2(floor)}-02`,`${aisle}${cube}-${p2(floor)}-03`];
   else if(cube!==undefined) positions = ALL_POS.filter(p=>p.startsWith(`${aisle}${cube}-`));
   else if(aisle) positions = ALL_POS.filter(p=>p.startsWith(aisle));
-  // no cap — print everything requested (whole warehouse is ~4,560 labels, well within browser limits)
   const w = window.open('','_blank');
   w.document.write('<html><head><link href="https://fonts.googleapis.com/css2?family=Libre+Barcode+128+Text&display=swap" rel="stylesheet"/>'+
     '<style>body{font-family:sans-serif;padding:8px;background:#fff}.g{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}'+
@@ -436,9 +489,9 @@ function printLabels(aisle, cube, floor){
   w.document.close();
 }
 
-// ── רינדור ───────────────────────────────────────────────────────────────────
+// ── רינדור תצוגת מיקום ────────────────────────────────────────────────────────
 function renderPosView(posId){
-  const d = data[posId];
+  const items = itemsOf(posId);
   const bc = POS_BC[posId];
   const m = posId.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
   const aisle=m?m[1]:'', cube=m?m[2]:'', floor=m?parseInt(m[3]):0, pos=m?parseInt(m[4]):0;
@@ -454,32 +507,37 @@ function renderPosView(posId){
     </div>
     <div class="pos-content">`;
 
-  if(d){
-    html += `<div class="pos-sku">${esc(d.sku)}</div>
-      ${d.name?`<div class="pos-name">${esc(d.name)}</div>`:''}
-      <div style="display:flex;align-items:baseline;gap:6px;margin-top:6px">
-        <div class="pos-qty">${Number(d.qty).toLocaleString()}</div>
-        <div class="pos-unit">${esc(d.unit)}</div>
-      </div>
-      ${d.note?`<div style="font-size:11px;color:var(--sub);margin-top:4px">${esc(d.note)}</div>`:''}
-      ${d.cartonBarcode?`<div style="font-size:11px;color:var(--acc);margin-top:4px;font-family:monospace">📦 קרטון משויך: ${esc(d.cartonBarcode)}</div>`:''}
-      <div class="pos-date">עודכן: ${fmtD(d.updatedAt)}</div>`;
-  } else {
+  if(items.length===0){
     html += `<div class="pos-empty">עמדה ריקה</div>`;
+  } else {
+    html += items.map(([itemId,item])=>`
+      <div class="item-card">
+        <div class="item-sku">${esc(item.sku)}</div>
+        ${item.name?`<div class="item-name">${esc(item.name)}</div>`:''}
+        <div class="item-qty-row">
+          <div class="item-qty">${Number(item.qty).toLocaleString()}</div>
+          <div class="item-unit">${esc(item.unit)}</div>
+        </div>
+        ${item.note?`<div class="item-note">${esc(item.note)}</div>`:''}
+        ${item.cartonBarcode?`<div class="item-carton">📦 קרטון משויך: ${esc(item.cartonBarcode)}</div>`:''}
+        <div class="item-date">עודכן: ${fmtD(item.updatedAt)}</div>
+        <div class="item-actions">
+          <button class="btn btn-p btn-sm" onclick="openEditItem('${posId}','${itemId}')">ערוך</button>
+          <button class="btn btn-blue btn-sm" onclick="openCartonAssign('${posId}','${itemId}')">📦 שייך קרטון</button>
+          <button class="btn btn-blue btn-sm" onclick="openChangeLocation('${posId}','${itemId}')">🔀 שנה מיקום</button>
+          <button class="btn btn-d btn-sm" onclick="askRemoveItem('${posId}','${itemId}')">הסר</button>
+        </div>
+      </div>`).join('');
   }
 
   html += `</div>
-    <div style="display:flex;gap:7px;margin-top:12px;flex-wrap:wrap">
-      <button class="btn btn-p" onclick="openEditGlobal('${posId}')">${d?'ערוך':'הכנס דגם'}</button>
-      ${d?`<button class="btn btn-blue" onclick="openCartonAssign()">📦 שייך קרטון</button>`:''}
-      ${d?`<button class="btn btn-blue" onclick="openChangeLocation()">🔀 שנה מיקום</button>`:''}
-      ${d?`<button class="btn btn-d btn-sm" onclick="askClear('${posId}')">נקה עמדה</button>`:''}
-    </div>
+    <button class="btn btn-p btn-w" onclick="openAddItem('${posId}')" style="margin-top:6px">➕ הוסף דגם למיקום</button>
   </div>`;
 
-  if(editing){
+  if(editingItem && editingItem.posId===posId){
+    const isNew = !editingItem.itemId;
     html += `<div class="edit-form" style="margin-top:10px">
-      <div class="edit-title">${d?'עדכון פרטים':'הכנסת דגם'} — ${posId}</div>
+      <div class="edit-title">${isNew?'הוספת דגם':'עדכון פרטים'} — ${posId}</div>
       <div class="fg">
         <label class="flbl">SKU / דגם</label>
         <input id="f-sku" class="finp" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
@@ -492,7 +550,7 @@ function renderPosView(posId){
         <div class="fg">
           <label class="flbl">כמות</label>
           <input class="finp" type="number" min="1" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
-            oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter')doSave('${posId}')" style="font-size:16px">
+            oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter')doSaveItem()" style="font-size:16px">
         </div>
         <div class="fg">
           <label class="flbl">יחידה</label>
@@ -509,40 +567,42 @@ function renderPosView(posId){
         <input class="finp rtl" placeholder="עונה, צבע, מידה..." value="${esc(fNote)}" oninput="setFNote(this.value)">
       </div>
       <div style="display:flex;gap:7px">
-        <button class="btn btn-g" style="flex:1" onclick="cancelEdit()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="doSave('${posId}')">שמור</button>
+        <button class="btn btn-g" style="flex:1" onclick="cancelEditItem()">ביטול</button>
+        <button class="btn btn-p" style="flex:1" onclick="doSaveItem()">שמור</button>
       </div>
     </div>`;
   }
 
-  if(assigningCarton){
+  if(assigningCartonFor && assigningCartonFor.posId===posId){
+    const item = data[posId]?.items?.[assigningCartonFor.itemId];
     html += `<div class="edit-form" style="margin-top:10px">
       <div class="edit-title">שיוך קרטון — ${posId}</div>
-      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">משייך לדגם הקיים: <b style="color:var(--acc)">${d?esc(d.sku):''}</b></div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">משייך לדגם: <b style="color:var(--acc)">${item?esc(item.sku):''}</b></div>
       <div class="fg">
         <label class="flbl">סרוק ברקוד קרטון</label>
         <input id="carton-scan-input" class="finp" placeholder="C000123..." value="${esc(cartonScanVal)}"
-          oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmCartonAssign('${posId}')">
+          oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmCartonAssign()">
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="confirmCartonAssign('${posId}')">✓ אישור</button>
+        <button class="btn btn-p" style="flex:1" onclick="confirmCartonAssign()">✓ אישור</button>
       </div>
     </div>`;
   }
 
-  if(changingLocation){
+  if(changingLocationFor && changingLocationFor.posId===posId){
+    const item = data[posId]?.items?.[changingLocationFor.itemId];
     html += `<div class="edit-form" style="margin-top:10px">
       <div class="edit-title">שינוי מיקום — מ-${posId}</div>
-      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${d?esc(d.sku):''}</b> ${d?`(${d.qty} ${esc(d.unit)})`:''}</div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${item?esc(item.sku):''}</b> ${item?`(${item.qty} ${esc(item.unit)})`:''}</div>
       <div class="fg">
         <label class="flbl">סרוק / הקלד מיקום יעד (ברקוד מדף או מיקום ישיר)</label>
         <input id="new-loc-input" class="finp" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
-          oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation('${posId}')">
+          oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation()">
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelChangeLocation()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="confirmChangeLocation('${posId}')">✓ אישור והעברה</button>
+        <button class="btn btn-p" style="flex:1" onclick="confirmChangeLocation()">✓ אישור והעברה</button>
       </div>
     </div>`;
   }
@@ -563,16 +623,19 @@ function hdrLabel(){
 }
 
 function render(){
-  const usedCount = Object.keys(data).length;
+  const occupiedPositions = ALL_POS.filter(isOccupied);
+  const usedCount = occupiedPositions.length;
   const totalCount = ALL_POS.length;
-  const uniqSKUs = new Set(Object.values(data).map(d=>d.sku)).size;
+  const allItems = [];
+  occupiedPositions.forEach(pos=>itemsOf(pos).forEach(([itemId,item])=>allItems.push(item)));
+  const uniqSKUs = new Set(allItems.map(i=>i.sku)).size;
 
   let contentHtml = '';
 
   if(tab==='map' && !mAisle){
     const tiles = AISLES.map(a=>{
       const positions = ALL_POS.filter(pos=>pos.startsWith(a));
-      const used = positions.filter(pos=>data[pos]).length;
+      const used = positions.filter(isOccupied).length;
       const pct = Math.min(100, Math.round(used/positions.length*100));
       return `<div class="tile" onclick="setAisle('${a}')">
         <div class="tile-name">${a}</div>
@@ -594,7 +657,7 @@ function render(){
   else if(tab==='map' && mAisle && !mCube && !mPos){
     const rows = CUBES.map(c=>{
       const positions = ALL_POS.filter(pos=>pos.startsWith(`${mAisle}${c}-`));
-      const used = positions.filter(pos=>data[pos]).length;
+      const used = positions.filter(isOccupied).length;
       return `<div class="row" onclick="setCube(${c})">
         <div class="row-id">קובייה ${c}</div>
         <div style="flex:1">
@@ -609,14 +672,23 @@ function render(){
   else if(tab==='map' && mAisle && mCube && !mPos){
     const rows = cubeFloors(mCube, mAisle).slice().reverse().map(f=>{
       const positions = [`${mAisle}${mCube}-${p2(f)}-01`,`${mAisle}${mCube}-${p2(f)}-02`,`${mAisle}${mCube}-${p2(f)}-03`];
-      const used = positions.filter(p=>data[p]).length;
+      const used = positions.filter(isOccupied).length;
       const boxes = positions.map(pid=>{
-        const d = data[pid];
+        const items = itemsOf(pid);
         const posNum = pid.slice(-2);
+        let inner;
+        if(items.length===0){
+          inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
+        } else if(items.length===1){
+          const it = items[0][1];
+          inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div><div style="font-size:10px;color:var(--sub)">${it.qty} ${esc(it.unit)}</div>`;
+        } else {
+          inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(items[0][1].sku)}</div><div style="font-size:10px;color:var(--sub)">+${items.length-1} נוספים</div>`;
+        }
         return `<div onclick="setPos('${pid}')"
-          style="flex:1;background:${d?'var(--ad)':'var(--surf)'};border:1px solid ${d?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
+          style="flex:1;background:${items.length?'var(--ad)':'var(--surf)'};border:1px solid ${items.length?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
           <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}</div>
-          ${d?`<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(d.sku)}</div><div style="font-size:10px;color:var(--sub)">${d.qty} ${esc(d.unit)}</div>`:'<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>'}
+          ${inner}
         </div>`;
       }).join('');
       return `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
@@ -647,11 +719,20 @@ function render(){
     contentHtml = renderPosView(scanPos);
   }
   else if(tab==='search'){
-    const results = sq.length>=2 ? Object.entries(data).filter(([,d])=>
-      d.sku.includes(sq.toUpperCase()) || (d.name||'').toLowerCase().includes(sq.toLowerCase())
-    ) : [];
-    const totalQty = results.reduce((s,[,d])=>s+Number(d.qty||0),0);
-    const allSelected = results.length>0 && results.every(([posId])=>searchSelected.has(posId));
+    const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
+    const results = [];
+    if(sq.length>=2){
+      ALL_POS.forEach(posId=>{
+        itemsOf(posId).forEach(([itemId,item])=>{
+          if(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow)){
+            results.push({posId, itemId, item});
+          }
+        });
+      });
+    }
+    const totalQty = results.reduce((s,r)=>s+Number(r.item.qty||0),0);
+    const uniqLocs = new Set(results.map(r=>r.posId)).size;
+    const allSelected = results.length>0 && results.every(r=>searchSelected.has(r.posId+'::'+r.itemId));
 
     contentHtml = `<div class="fg" style="margin-bottom:11px">
       <input id="search-input" class="finp rtl" placeholder="חפש דגם / SKU..." value="${esc(sq)}"
@@ -662,7 +743,7 @@ function render(){
 
     if(sq.length>=2 && results.length>0){
       contentHtml += `<div style="background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:10px 12px;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-        <div style="font-size:12px;color:var(--sub)">סה"כ <b style="color:var(--acc)">${totalQty}</b> קרטונים ב-<b style="color:var(--acc)">${results.length}</b> מיקומים</div>
+        <div style="font-size:12px;color:var(--sub)">סה"כ <b style="color:var(--acc)">${totalQty}</b> קרטונים ב-<b style="color:var(--acc)">${uniqLocs}</b> מיקומים</div>
         <button class="btn btn-blue btn-sm" onclick="exportToExcel(true)">📥 ייצוא תוצאות</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:7px;padding:2px 2px 8px">
@@ -674,15 +755,16 @@ function render(){
       </div>`;
     }
 
-    contentHtml += results.map(([posId,d])=>{
-      const checked = searchSelected.has(posId);
+    contentHtml += results.map(r=>{
+      const key = r.posId+'::'+r.itemId;
+      const checked = searchSelected.has(key);
       return `<div class="sr" style="align-items:flex-start">
-        <input type="checkbox" ${checked?'checked':''} onclick="event.stopPropagation();toggleSearchSelect('${posId}')" style="width:16px;height:16px;cursor:pointer;margin-top:2px;flex-shrink:0">
-        <div style="flex:1;min-width:0;cursor:pointer" onclick="goToPosFromSearch('${posId}')">
-          <div style="font-family:monospace;font-size:11px;font-weight:900;color:var(--acc)">${esc(d.sku)}</div>
-          ${d.name?`<div style="font-size:11px;margin-top:1px">${esc(d.name)}</div>`:''}
-          <div style="font-size:11px;color:var(--sub);margin-top:1px">${d.qty} ${esc(d.unit)}</div>
-          <div style="font-size:10px;color:var(--mut);font-family:monospace;margin-top:1px">${posId} · ${POS_BC[posId]}</div>
+        <input type="checkbox" ${checked?'checked':''} onclick="event.stopPropagation();toggleSearchSelect('${key}')" style="width:16px;height:16px;cursor:pointer;margin-top:2px;flex-shrink:0">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="goToPosFromSearch('${r.posId}')">
+          <div style="font-family:monospace;font-size:11px;font-weight:900;color:var(--acc)">${esc(r.item.sku)}</div>
+          ${r.item.name?`<div style="font-size:11px;margin-top:1px">${esc(r.item.name)}</div>`:''}
+          <div style="font-size:11px;color:var(--sub);margin-top:1px">${r.item.qty} ${esc(r.item.unit)}</div>
+          <div style="font-size:10px;color:var(--mut);font-family:monospace;margin-top:1px">${r.posId} · ${POS_BC[r.posId]}</div>
         </div>
       </div>`;
     }).join('');
@@ -731,6 +813,7 @@ function render(){
       <div class="settings-sec">
         <div class="settings-ttl">נתונים</div>
         <div class="info-row"><span>עמדות תפוסות</span><span class="info-val">${usedCount} / ${totalCount}</span></div>
+        <div class="info-row"><span>סה"כ פריטים</span><span class="info-val">${allItems.length}</span></div>
         <div class="info-row"><span>דגמים שונים</span><span class="info-val">${uniqSKUs}</span></div>
         <div class="info-row"><span>תנועות ביומן</span><span class="info-val">${movs.length}</span></div>
         <button class="btn btn-blue btn-w" onclick="exportToExcel()" style="margin-top:10px">📥 ייצוא מלאי לאקסל</button>
@@ -742,7 +825,7 @@ function render(){
       </div>
       <div class="settings-sec">
         <div class="settings-ttl">הדפסת מדבקות ברקוד</div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">הדפסה לפי מעבר — עד 500 מדבקות בפעם</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">הדפסה לפי מעבר, או הכל בבת אחת</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${AISLES.map(a=>`<button class="btn btn-blue btn-sm" onclick="printLabels('${a}')">מעבר ${a}</button>`).join('')}
           <button class="btn btn-p btn-sm" onclick="printLabels()">🖨 הכל (${ALL_POS.length.toLocaleString()})</button>
@@ -760,7 +843,7 @@ function render(){
       <div class="content" id="content-scroll">${contentHtml}</div>
       ${(tab==='search' && searchSelected.size>0) ? `
       <div class="bulk-bar">
-        <button class="btn btn-d btn-w" onclick="askBulkRemove()">🗑 הוצא ${searchSelected.size} עמדות נבחרות מהמחסן</button>
+        <button class="btn btn-d btn-w" onclick="askBulkRemove()">🗑 הוצא ${searchSelected.size} פריטים נבחרים מהמחסן</button>
       </div>` : ''}
       <div class="scroll-wrap" id="scroll-wrap" style="bottom:${(tab==='search' && searchSelected.size>0) ? 122 : 66}px">
         <button class="scroll-btn" id="scroll-top-btn" onclick="scrollContentTop()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg></button>
@@ -820,9 +903,9 @@ function navBtn(id,lbl,svgInner){
 
 function switchTab(id){
   if(id!==tab){
-    editing=false;
-    assigningCarton=false; cartonScanVal="";
-    changingLocation=false; newLocScanVal="";
+    editingItem=null;
+    assigningCartonFor=null; cartonScanVal="";
+    changingLocationFor=null; newLocScanVal="";
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
     if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
   }
@@ -834,11 +917,14 @@ function switchTab(id){
 // Expose functions used by inline onclick handlers
 // (inline onclick runs in global scope, so all state mutation must go through
 // these window-level wrapper functions rather than direct variable assignment)
-window.openEditGlobal = openEdit;
-window.askClear = (posId)=>{
-  if(confirm('לנקות את העמדה '+posId+'?')){ doClear(posId); }
+window.openAddItem = openAddItem;
+window.openEditItem = openEditItem;
+window.cancelEditItem = cancelEditItem;
+window.doSaveItem = doSaveItem;
+window.askRemoveItem = (posId,itemId)=>{
+  const item = data[posId]?.items?.[itemId];
+  if(item && confirm(`להסיר את ${item.sku} מהמיקום ${posId}?`)){ removeItem(posId,itemId); }
 };
-window.doSave = doSave;
 window.doScan = doScan;
 window.resetScan = resetScan;
 window.printLabels = printLabels;
@@ -848,12 +934,12 @@ window.toggleSelectAllSearch = toggleSelectAllSearch;
 window.clearSearchSelection = ()=>{ searchSelected = new Set(); render(); };
 window.askBulkRemove = ()=>{
   if(searchSelected.size===0) return;
-  if(confirm(`להוציא ${searchSelected.size} עמדות מהמחסן? הפעולה תתועד ביומן.`)){
+  if(confirm(`להוציא ${searchSelected.size} פריטים מהמחסן? הפעולה תתועד ביומן.`)){
     bulkRemoveSelected();
   }
 };
 window.importSeedData = ()=>{
-  if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות קיימות לא יידרסו.')){
+  if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות תפוסות לא יידרסו.')){
     importSeedData();
   }
 };
@@ -861,11 +947,10 @@ window.switchTab = switchTab;
 window.render = render;
 window.setAisle = (a)=>{ mAisle=a; render(); };
 window.setCube = (c)=>{ mCube=c; render(); };
-window.setPos = (p)=>{ mPos=p; editing=false; render(); };
+window.setPos = (p)=>{ mPos=p; editingItem=null; render(); };
 window.backCube = ()=>{ mCube=null; render(); };
 window.backAisle = ()=>{ mAisle=null; render(); };
-window.backFromPos = ()=>{ mPos=null; editing=false; render(); };
-window.cancelEdit = ()=>{ editing=false; render(); };
+window.backFromPos = ()=>{ mPos=null; editingItem=null; render(); };
 window.setFSKU = (v)=>{ fSKU = v.toUpperCase(); };
 window.setFName = (v)=>{ fName = v; };
 window.setFQty = (v)=>{ fQty = v; };
@@ -873,7 +958,7 @@ window.setFUnit = (v)=>{ fUnit = v; };
 window.setFNote = (v)=>{ fNote = v; };
 window.setScanVal = (v)=>{ scanVal = v.toUpperCase(); scanErr=''; };
 window.setSQ = (v)=>{ sq = v; render(); };
-window.goToPosFromSearch = (posId)=>{ tab='map'; mPos=posId; editing=false; render(); };
+window.goToPosFromSearch = (posId)=>{ tab='map'; mPos=posId; editingItem=null; render(); };
 window.scrollContentTop = scrollContentTop;
 window.scrollContentBottom = scrollContentBottom;
 window.openCartonAssign = openCartonAssign;
