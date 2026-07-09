@@ -99,6 +99,11 @@ select.finp{cursor:pointer}
 .settings-sec{background:var(--card);border-radius:var(--r);padding:12px;margin-bottom:10px;border:1px solid var(--b)}
 .settings-ttl{font-size:10px;font-weight:900;color:var(--acc);margin-bottom:9px;letter-spacing:.5px;text-transform:uppercase}
 .gate{display:flex;align-items:center;justify-content:center;min-height:100dvh;color:var(--sub);font-size:13px}
+.bulk-bar{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);width:100%;max-width:600px;padding:10px 12px;background:var(--bg);border-top:1px solid var(--b);z-index:150;box-shadow:0 -4px 12px rgba(0,0,0,.4)}
+.scroll-wrap{position:fixed;left:14px;display:flex;flex-direction:column;gap:8px;z-index:160;transition:bottom .2s}
+.scroll-btn{width:40px;height:40px;border-radius:50%;background:var(--card);border:1px solid var(--b);color:var(--acc);display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.4);opacity:0;pointer-events:none;transition:opacity .2s;flex-shrink:0}
+.scroll-btn.visible{opacity:1;pointer-events:auto}
+.scroll-btn svg{width:18px;height:18px}
 </style>
 </head>
 <body>
@@ -583,7 +588,7 @@ function render(){
     if(!sq) contentHtml += `<div style="font-size:12px;color:var(--mut);text-align:center;margin-top:32px">הקלד שם דגם או SKU לחיפוש</div>`;
 
     if(searchSelected.size>0){
-      contentHtml += `<button class="btn btn-d btn-w" onclick="askBulkRemove()" style="margin-top:10px">🗑 הוצא ${searchSelected.size} עמדות נבחרות מהמחסן</button>`;
+      contentHtml += `<div style="height:56px"></div>`; // spacer so the floating bulk bar doesn't cover the last row
     }
   }
   else if(tab==='log'){
@@ -644,7 +649,15 @@ function render(){
         <button class="logout-btn" onclick="window.location.href='/api/logout'">🚪 יציאה</button>
         <div class="badge">ADDICT WH</div>
       </div>
-      <div class="content">${contentHtml}</div>
+      <div class="content" id="content-scroll">${contentHtml}</div>
+      ${(tab==='search' && searchSelected.size>0) ? `
+      <div class="bulk-bar">
+        <button class="btn btn-d btn-w" onclick="askBulkRemove()">🗑 הוצא ${searchSelected.size} עמדות נבחרות מהמחסן</button>
+      </div>` : ''}
+      <div class="scroll-wrap" id="scroll-wrap" style="bottom:${(tab==='search' && searchSelected.size>0) ? 122 : 66}px">
+        <button class="scroll-btn" id="scroll-top-btn" onclick="scrollContentTop()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg></button>
+        <button class="scroll-btn" id="scroll-bottom-btn" onclick="scrollContentBottom()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
+      </div>
       <nav class="nav">
         ${navBtn('map','מפה','<polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"/><line x1="9" y1="3" x2="9" y2="18"/><line x1="15" y1="6" x2="15" y2="21"/>')}
         ${navBtn('scan','סריקה','<rect x="2" y="4" width="3" height="4" rx=".5"/><rect x="9.5" y="4" width="3" height="4" rx=".5"/><rect x="17" y="4" width="3" height="4" rx=".5"/><rect x="2" y="11" width="18" height="2" rx=".5"/><rect x="2" y="16" width="3" height="4" rx=".5"/><rect x="9.5" y="16" width="3" height="4" rx=".5"/><rect x="17" y="16" width="3" height="4" rx=".5"/>')}
@@ -663,6 +676,32 @@ function render(){
     const el=document.getElementById('scan-input');
     if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
   }
+
+  // Wire up scroll-to-top/bottom button visibility (content div is rebuilt every render)
+  const contentEl = document.getElementById('content-scroll');
+  if(contentEl){
+    const updateBtns = ()=>{
+      const topBtn = document.getElementById('scroll-top-btn');
+      const botBtn = document.getElementById('scroll-bottom-btn');
+      if(!topBtn||!botBtn) return;
+      const scrollable = contentEl.scrollHeight > contentEl.clientHeight + 40;
+      const atTop = contentEl.scrollTop < 80;
+      const atBottom = contentEl.scrollTop + contentEl.clientHeight >= contentEl.scrollHeight - 40;
+      topBtn.className = 'scroll-btn'+(scrollable && !atTop ? ' visible' : '');
+      botBtn.className = 'scroll-btn'+(scrollable && !atBottom ? ' visible' : '');
+    };
+    contentEl.addEventListener('scroll', updateBtns);
+    updateBtns();
+  }
+}
+
+function scrollContentTop(){
+  const el = document.getElementById('content-scroll');
+  if(el) el.scrollTo({top:0, behavior:'smooth'});
+}
+function scrollContentBottom(){
+  const el = document.getElementById('content-scroll');
+  if(el) el.scrollTo({top:el.scrollHeight, behavior:'smooth'});
 }
 
 function navBtn(id,lbl,svgInner){
@@ -725,6 +764,8 @@ window.setFNote = (v)=>{ fNote = v; };
 window.setScanVal = (v)=>{ scanVal = v.toUpperCase(); scanErr=''; };
 window.setSQ = (v)=>{ sq = v; render(); };
 window.goToPosFromSearch = (posId)=>{ tab='map'; mPos=posId; editing=false; render(); };
+window.scrollContentTop = scrollContentTop;
+window.scrollContentBottom = scrollContentBottom;
 
 render();
 
