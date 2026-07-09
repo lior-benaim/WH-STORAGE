@@ -87,6 +87,8 @@ select.finp{cursor:pointer}
 .mov-ic.in{background:rgba(34,197,94,.12);color:var(--grn)}
 .mov-ic.out{background:rgba(239,68,68,.12);color:var(--red)}
 .mov-ic.edit{background:rgba(240,196,25,.12);color:var(--acc)}
+.mov-ic.move{background:rgba(96,165,250,.12);color:var(--blue)}
+.mov-ic.link{background:rgba(240,196,25,.12);color:var(--acc)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:flex-end;justify-content:center;z-index:300;padding:12px}
 .modal{background:var(--card);border-radius:12px;padding:16px;width:100%;max-width:380px;border:1px solid var(--b)}
 .toast{position:fixed;top:12px;left:50%;transform:translateX(-50%);background:rgba(16,16,16,.96);border:1px solid rgba(34,197,94,.35);color:var(--grn);padding:7px 15px;border-radius:20px;font-size:12px;font-weight:700;z-index:400;white-space:nowrap}
@@ -186,6 +188,7 @@ let searchSelected=new Set(); // positions selected for bulk removal on the sear
 // position) + the barcode on the physical carton, then confirms — linking
 // that specific carton to this position for traceability. No pre-registration.
 let assigningCarton=false, cartonScanVal="";
+let changingLocation=false, newLocScanVal="";
 let toastTimer=null;
 
 const root = document.getElementById('root');
@@ -325,6 +328,38 @@ async function confirmCartonAssign(posId){
   render();
 }
 
+function openChangeLocation(){
+  changingLocation=true; newLocScanVal=""; editing=false; assigningCarton=false;
+  render();
+  setTimeout(()=>{ const el=document.getElementById('new-loc-input'); if(el) el.focus(); }, 60);
+}
+function cancelChangeLocation(){
+  changingLocation=false; newLocScanVal="";
+  render();
+}
+async function confirmChangeLocation(oldPosId){
+  const raw = (newLocScanVal||'').trim().toUpperCase();
+  if(!raw){ notify('חובה לסרוק / להזין מיקום חדש','warn'); return; }
+  let newPos = null;
+  if(POS_BC_REV[raw]) newPos = POS_BC_REV[raw];
+  else if(POS_BC[raw]) newPos = raw;
+  if(!newPos){ notify('מיקום לא נמצא: '+raw,'warn'); return; }
+  if(newPos===oldPosId){ notify('זהו אותו מיקום','warn'); return; }
+  if(data[newPos]){ notify('המיקום החדש תפוס — יש לפנות אותו קודם','warn'); return; }
+  const d = data[oldPosId];
+  if(!d){ notify('אין מה להעביר — המיקום ריק','warn'); return; }
+  await db.ref('positions/'+fkey(newPos)).set({...d, updatedAt:new Date().toISOString()});
+  await db.ref('positions/'+fkey(oldPosId)).remove();
+  await db.ref('movements/'+mkId()).set({
+    ts:new Date().toISOString(), pos:newPos, fromPos:oldPosId, type:'move', sku:d.sku, qty:d.qty, unit:d.unit
+  });
+  notify(`✓ הועבר מ-${oldPosId} ל-${newPos}`);
+  changingLocation=false; newLocScanVal="";
+  if(tab==='map') mPos=newPos;
+  if(tab==='scan') scanPos=newPos;
+  render();
+}
+
 function doScan(){
   const v = (scanVal||'').trim().toUpperCase(); if(!v) return;
   scanErr='';
@@ -437,6 +472,7 @@ function renderPosView(posId){
     <div style="display:flex;gap:7px;margin-top:12px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="openEditGlobal('${posId}')">${d?'ערוך':'הכנס דגם'}</button>
       ${d?`<button class="btn btn-blue" onclick="openCartonAssign()">📦 שייך קרטון</button>`:''}
+      ${d?`<button class="btn btn-blue" onclick="openChangeLocation()">🔀 שנה מיקום</button>`:''}
       ${d?`<button class="btn btn-d btn-sm" onclick="askClear('${posId}')">נקה עמדה</button>`:''}
     </div>
   </div>`;
@@ -491,6 +527,22 @@ function renderPosView(posId){
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
         <button class="btn btn-p" style="flex:1" onclick="confirmCartonAssign('${posId}')">✓ אישור</button>
+      </div>
+    </div>`;
+  }
+
+  if(changingLocation){
+    html += `<div class="edit-form" style="margin-top:10px">
+      <div class="edit-title">שינוי מיקום — מ-${posId}</div>
+      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${d?esc(d.sku):''}</b> ${d?`(${d.qty} ${esc(d.unit)})`:''}</div>
+      <div class="fg">
+        <label class="flbl">סרוק / הקלד מיקום יעד (ברקוד מדף או מיקום ישיר)</label>
+        <input id="new-loc-input" class="finp" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
+          oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation('${posId}')">
+      </div>
+      <div style="display:flex;gap:7px">
+        <button class="btn btn-g" style="flex:1" onclick="cancelChangeLocation()">ביטול</button>
+        <button class="btn btn-p" style="flex:1" onclick="confirmChangeLocation('${posId}')">✓ אישור והעברה</button>
       </div>
     </div>`;
   }
@@ -645,13 +697,19 @@ function render(){
     if(!movs.length){
       contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
     } else {
+      const movIcon = t => t==='in'?'in':t==='out'?'out':t==='move'?'move':t==='link'?'link':'edit';
+      const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
+      const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
       contentHtml = `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${movs.length} תנועות</div>` +
         movs.map(m=>`<div class="mov">
-          <div class="mov-ic ${m.type==='in'?'in':m.type==='out'?'out':'edit'}">${m.type==='in'?'↓':m.type==='out'?'↑':'✎'}</div>
+          <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
           <div style="flex:1">
-            <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">${esc(m.pos)}</div>
+            <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
+              ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
+            </div>
             <div style="font-size:11px;color:var(--sub);margin-top:1px">
-              ${m.type==='in'?'הוכנס':m.type==='out'?'הוצא':'עודכן'} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+              ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+              ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
               ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
             </div>
             <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}</div>
@@ -764,6 +822,7 @@ function switchTab(id){
   if(id!==tab){
     editing=false;
     assigningCarton=false; cartonScanVal="";
+    changingLocation=false; newLocScanVal="";
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
     if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
   }
@@ -821,6 +880,10 @@ window.openCartonAssign = openCartonAssign;
 window.cancelCartonAssign = cancelCartonAssign;
 window.confirmCartonAssign = confirmCartonAssign;
 window.setCartonScanVal = (v)=>{ cartonScanVal = v.toUpperCase(); };
+window.openChangeLocation = openChangeLocation;
+window.cancelChangeLocation = cancelChangeLocation;
+window.confirmChangeLocation = confirmChangeLocation;
+window.setNewLocScanVal = (v)=>{ newLocScanVal = v.toUpperCase(); };
 
 render();
 
