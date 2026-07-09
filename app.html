@@ -338,8 +338,8 @@ function cancelCartonAssign(){
   assigningCarton=false; cartonMatch=null; cartonErr="";
   render();
 }
-function doCartonLookup(val){
-  const bc = (val||'').trim().toUpperCase(); if(!bc) return;
+function doCartonLookup(){
+  const bc = (cartonScanVal||'').trim().toUpperCase(); if(!bc) return;
   cartonErr="";
   const c = cartons[bc];
   if(!c){ cartonErr = `קרטון ${bc} לא רשום. יש לרשום אותו קודם בעמוד "קרטונים".`; cartonMatch=null; cartonScanVal=""; render(); return; }
@@ -366,8 +366,8 @@ async function confirmCartonAssign(posId){
   render();
 }
 
-function doScan(val){
-  const v = (val||'').trim().toUpperCase(); if(!v) return;
+function doScan(){
+  const v = (scanVal||'').trim().toUpperCase(); if(!v) return;
   scanErr='';
   if(POS_BC_REV[v]){ openPos(POS_BC_REV[v]); scanVal=''; render(); return; }
   if(POS_BC[v]){ openPos(v); scanVal=''; render(); return; }
@@ -496,7 +496,7 @@ function renderPosView(posId){
         <div class="fg">
           <label class="flbl">כמות</label>
           <input class="finp" type="number" min="1" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
-            oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter'&&fSKU&&fQty)doSave('${posId}')" style="font-size:16px">
+            oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter')doSave('${posId}')" style="font-size:16px">
         </div>
         <div class="fg">
           <label class="flbl">יחידה</label>
@@ -526,12 +526,12 @@ function renderPosView(posId){
       html += `<div class="fg">
         <label class="flbl">סרוק ברקוד קרטון</label>
         <input id="carton-scan-input" class="finp" placeholder="C000123..." value="${esc(cartonScanVal)}"
-          oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')doCartonLookup(cartonScanVal)">
+          oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')doCartonLookup()">
       </div>
       ${cartonErr?`<div style="font-size:11px;color:var(--red);margin-bottom:8px">${esc(cartonErr)}</div>`:''}
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="doCartonLookup(cartonScanVal)">חפש</button>
+        <button class="btn btn-p" style="flex:1" onclick="doCartonLookup()">חפש</button>
       </div>`;
     } else {
       html += `<div style="background:var(--surf);border-radius:var(--rs);padding:10px;margin-bottom:10px">
@@ -639,10 +639,10 @@ function render(){
       <div class="sec-ttl">סרוק ברקוד עמדה</div>
       <input id="scan-input" class="scan-inp" placeholder="P00001..." value="${esc(scanVal)}"
         oninput="setScanVal(this.value);this.value=scanVal"
-        onkeydown="if(event.key==='Enter')doScan(scanVal)" autocomplete="off">
+        onkeydown="if(event.key==='Enter')doScan()" autocomplete="off">
       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:5px">סרוק את הברקוד שעל המדף הפיזי</div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
-      <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan(scanVal)" ${!scanVal.trim()?'disabled':''}>פתח עמדה</button>
+      <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()">פתח עמדה</button>
     </div>`;
   }
   else if(tab==='scan' && scanPos){
