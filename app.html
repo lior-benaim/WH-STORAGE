@@ -488,6 +488,18 @@ function openCartonAssign(posId, itemId){
   setTimeout(()=>{ const el=document.getElementById('carton-scan-input'); if(el) el.focus(); }, 60);
 }
 function cancelCartonAssign(){ assigningCartonFor=null; cartonScanVal=""; render(); }
+// Finds where a carton barcode is already linked (if anywhere), excluding a given item.
+// Used to prevent the same physical carton being linked to two different items/positions.
+function findCartonBarcodeOwner(bc, excludePosId, excludeItemId){
+  for(const posId of Object.keys(data)){
+    for(const [itemId, item] of Object.entries(data[posId]?.items||{})){
+      if(posId===excludePosId && itemId===excludeItemId) continue;
+      if(item.cartonBarcode === bc) return {posId, itemId, item};
+    }
+  }
+  return null;
+}
+
 async function confirmCartonAssign(){
   if(!assigningCartonFor) return;
   const {posId, itemId} = assigningCartonFor;
@@ -495,6 +507,11 @@ async function confirmCartonAssign(){
   if(!bc){ notify('חובה לסרוק ברקוד קרטון','warn'); return; }
   const item = data[posId]?.items?.[itemId];
   if(!item){ notify('הפריט לא נמצא','warn'); return; }
+  const existing = findCartonBarcodeOwner(bc, posId, itemId);
+  if(existing){
+    notify(`⚠️ קרטון ${bc} כבר משויך ל-${existing.item.sku} ב-${existing.posId} — כל קרטון יכול להיות משויך למקום אחד בלבד`, 'warn');
+    return;
+  }
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/cartonBarcode`).set(bc);
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/updatedAt`).set(new Date().toISOString());
   await db.ref('movements/'+mkId()).set({
