@@ -377,7 +377,7 @@ function removeCalcRow(idx){
   render();
 }
 function setCalcRowType(idx,val){ calcRows[idx].type = val; render(); }
-function setCalcRowQty(idx,val){ calcRows[idx].qty = val; render(); }
+function setCalcRowQty(idx,val){ calcRows[idx].qty = val.replace(/[^0-9]/g,''); render(); }
 
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
 function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; render(); }
@@ -404,7 +404,7 @@ function removePickRow(idx){
   render();
 }
 function setPickRowSku(idx,val){ pickRows[idx].sku = val.toUpperCase(); pickActiveDropdown = idx; render(); }
-function setPickRowQty(idx,val){ pickRows[idx].qty = val; render(); }
+function setPickRowQty(idx,val){ pickRows[idx].qty = val.replace(/[^0-9]/g,''); render(); }
 function scanPickRowCamera(idx){
   openCameraScan(text=>{ setPickRowSku(idx, (text||'').trim()); });
 }
@@ -418,7 +418,11 @@ function getAllSkusSummary(){
   });
   return Object.values(map).sort((a,b)=>a.sku.localeCompare(b.sku));
 }
-function setPickActiveDropdown(idx){ pickActiveDropdown = idx; render(); }
+function setPickActiveDropdown(idx){
+  if(pickActiveDropdown===idx) return; // already open for this row — avoid a redundant render on every re-focus after each keystroke
+  pickActiveDropdown = idx;
+  render();
+}
 function scheduleClosePickDropdown(idx){
   setTimeout(()=>{ if(pickActiveDropdown===idx){ pickActiveDropdown=null; render(); } }, 150);
 }
@@ -790,7 +794,7 @@ function renderPosView(posId){
       <div class="frow">
         <div class="fg">
           <label class="flbl">כמות</label>
-          <input class="finp" type="number" min="1" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
+          <input class="finp" type="text" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
             oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter')doSaveItem()" style="font-size:16px">
         </div>
         <div class="fg">
@@ -1061,7 +1065,7 @@ function render(){
           </div>
           <div class="fg">
             <label class="flbl">כמות קרטונים</label>
-            <input id="calc-qty-${idx}" class="finp" type="number" min="0" inputmode="numeric" placeholder="0"
+            <input id="calc-qty-${idx}" class="finp" type="text" inputmode="numeric" placeholder="0"
               value="${esc(row.qty)}" oninput="setCalcRowQty(${idx},this.value)" style="font-size:16px">
           </div>
         </div>
@@ -1109,7 +1113,7 @@ function render(){
           </div>
           <div class="fg">
             <label class="flbl">כמות (אופציונלי)</label>
-            <input class="finp" type="number" min="0" inputmode="numeric" placeholder="הכל" value="${esc(row.qty)}" oninput="setPickRowQty(${idx},this.value)">
+            <input class="finp" type="text" inputmode="numeric" placeholder="הכל" value="${esc(row.qty)}" oninput="setPickRowQty(${idx},this.value)">
           </div>
         </div>
         ${pickRows.length>1?`<button class="btn btn-d btn-sm btn-w" style="margin-bottom:9px" onclick="removePickRow(${idx})">הסר שורה</button>`:''}`;
@@ -1292,12 +1296,18 @@ function render(){
     </div>`;
 
   // Restore focus generically for whatever input was active before this render
-  // (covers search/scan inputs as well as the dynamic calculator row inputs)
+  // (covers search/scan inputs as well as the dynamic calculator/pick row inputs)
   if(_activeId){
     const el = document.getElementById(_activeId);
     if(el){
       el.focus();
-      if(_activeSel!=null && el.setSelectionRange){ try{ el.setSelectionRange(_activeSel,_activeSel); }catch{} }
+      if(_activeSel!=null && el.setSelectionRange){
+        try{ el.setSelectionRange(_activeSel,_activeSel); }catch{}
+        // Some browsers haven't fully settled focus on the freshly-created element yet,
+        // which silently resets the cursor to position 0 — re-apply on the next frame
+        // to make sure it actually sticks (this is what caused digits to appear reversed).
+        requestAnimationFrame(()=>{ try{ el.setSelectionRange(_activeSel,_activeSel); }catch{} });
+      }
     }
   }
 
@@ -1387,7 +1397,7 @@ window.backAisle = ()=>{ mAisle=null; render(); };
 window.backFromPos = ()=>{ mPos=null; editingItem=null; render(); };
 window.setFSKU = (v)=>{ fSKU = v.toUpperCase(); };
 window.setFName = (v)=>{ fName = v; };
-window.setFQty = (v)=>{ fQty = v; };
+window.setFQty = (v)=>{ fQty = v.replace(/[^0-9]/g,''); };
 window.setFUnit = (v)=>{ fUnit = v; };
 window.setFNote = (v)=>{ fNote = v; };
 window.setScanVal = (v)=>{ scanVal = v.toUpperCase(); scanErr=''; };
