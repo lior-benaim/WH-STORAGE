@@ -325,10 +325,22 @@ function openCameraScan(onResult){
     return;
   }
 
-  _cameraScanner = new Html5Qrcode("qr-reader");
+  // Restrict to Code128 only (the format used by all our barcodes) — this makes each
+  // camera frame decode faster and more reliably than scanning for every possible
+  // format at once, which was causing linear barcodes to be missed.
+  const scannerConfig = (typeof Html5QrcodeSupportedFormats !== 'undefined')
+    ? { formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128] }
+    : undefined;
+  _cameraScanner = new Html5Qrcode("qr-reader", scannerConfig);
   _cameraScanner.start(
     { facingMode: "environment" },
-    { fps: 10, qrbox: { width: 260, height: 140 } },
+    {
+      fps: 10,
+      qrbox: { width: 300, height: 120 },
+      // Request a higher-resolution feed — sharper video makes the thin bars in a
+      // linear barcode much easier for the decoder to distinguish.
+      videoConstraints: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
+    },
     (decodedText) => {
       const val = decodedText;
       closeCameraScan();
