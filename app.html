@@ -216,10 +216,10 @@ let sq="";
 let searchSelected=new Set(); // composite "posId::itemId" keys selected for bulk removal on the search page
 
 // ── Carton barcode linking (per item) ──────────────────────────────────────
-let assigningCartonFor=null, cartonScanVal=""; // assigningCartonFor: {posId,itemId}
+let assigningCartonFor=null, cartonScanVal="", pendingCartonBc=null; // assigningCartonFor: {posId,itemId}; pendingCartonBc: validated barcode awaiting final confirm
 
 // ── Change location (per item) ─────────────────────────────────────────────
-let changingLocationFor=null, newLocScanVal=""; // changingLocationFor: {posId,itemId}
+let changingLocationFor=null, newLocScanVal="", pendingNewLoc=null; // changingLocationFor: {posId,itemId}; pendingNewLoc: validated destination awaiting final confirm
 
 let toastTimer=null;
 
@@ -349,10 +349,10 @@ function scanShelfCamera(){
   openCameraScan(text=>{ scanVal = (text||'').trim().toUpperCase(); doScan(); });
 }
 function scanCartonCamera(){
-  openCameraScan(text=>{ cartonScanVal = (text||'').trim().toUpperCase(); confirmCartonAssign(); });
+  openCameraScan(text=>{ cartonScanVal = (text||'').trim().toUpperCase(); resolveCartonAssign(); });
 }
 function scanLocationCamera(){
-  openCameraScan(text=>{ newLocScanVal = (text||'').trim().toUpperCase(); confirmChangeLocation(); });
+  openCameraScan(text=>{ newLocScanVal = (text||'').trim().toUpperCase(); resolveChangeLocation(); });
 }
 
 function goToPosition(posId){
@@ -480,11 +480,11 @@ async function bulkRemoveSelected(){
 
 // ── שיוך קרטון (לכל פריט) ───────────────────────────────────────────────────
 function openCartonAssign(posId, itemId){
-  assigningCartonFor = {posId, itemId}; cartonScanVal=""; editingItem=null; changingLocationFor=null;
+  assigningCartonFor = {posId, itemId}; cartonScanVal=""; pendingCartonBc=null; editingItem=null; changingLocationFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('carton-scan-input'); if(el) el.focus(); }, 60);
 }
-function cancelCartonAssign(){ assigningCartonFor=null; cartonScanVal=""; render(); }
+function cancelCartonAssign(){ assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null; render(); }
 // Finds where a carton barcode is already linked (if anywhere), excluding a given item.
 // Used to prevent the same physical carton being linked to two different items/positions.
 function findCartonBarcodeOwner(bc, excludePosId, excludeItemId){
@@ -497,7 +497,8 @@ function findCartonBarcodeOwner(bc, excludePosId, excludeItemId){
   return null;
 }
 
-async function confirmCartonAssign(){
+// Step 1: validate the scanned/typed carton barcode and show a preview (no write yet)
+function resolveCartonAssign(){
   if(!assigningCartonFor) return;
   const {posId, itemId} = assigningCartonFor;
   const bc = (cartonScanVal||'').trim().toUpperCase();
@@ -509,24 +510,36 @@ async function confirmCartonAssign(){
     notify(`⚠️ קרטון ${bc} כבר משויך ל-${existing.item.sku} ב-${existing.posId} — כל קרטון יכול להיות משויך למקום אחד בלבד`, 'warn');
     return;
   }
+  pendingCartonBc = bc;
+  render();
+}
+// Step 2: user reviewed the preview and pressed the final confirm button — now actually write it
+async function confirmCartonAssign(){
+  if(!assigningCartonFor || !pendingCartonBc) return;
+  const {posId, itemId} = assigningCartonFor;
+  const bc = pendingCartonBc;
+  const item = data[posId]?.items?.[itemId];
+  if(!item){ notify('הפריט לא נמצא','warn'); return; }
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/cartonBarcode`).set(bc);
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/updatedAt`).set(new Date().toISOString());
   await db.ref('movements/'+mkId()).set({
     ts:new Date().toISOString(), pos:posId, type:'link', sku:item.sku, qty:item.qty, unit:item.unit, carton:bc
   });
   notify(`✓ קרטון ${bc} שויך ל-${posId}`);
-  assigningCartonFor=null; cartonScanVal="";
+  assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null;
   render();
 }
 
 // ── שינוי מיקום (לכל פריט) ───────────────────────────────────────────────────
 function openChangeLocation(posId, itemId){
-  changingLocationFor = {posId, itemId}; newLocScanVal=""; editingItem=null; assigningCartonFor=null;
+  changingLocationFor = {posId, itemId}; newLocScanVal=""; pendingNewLoc=null; editingItem=null; assigningCartonFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('new-loc-input'); if(el) el.focus(); }, 60);
 }
-function cancelChangeLocation(){ changingLocationFor=null; newLocScanVal=""; render(); }
-async function confirmChangeLocation(){
+function cancelChangeLocation(){ changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null; render(); }
+
+// Step 1: resolve/validate the scanned or typed destination and show a preview (no write yet)
+function resolveChangeLocation(){
   if(!changingLocationFor) return;
   const {posId:oldPos, itemId} = changingLocationFor;
   const raw = (newLocScanVal||'').trim().toUpperCase();
@@ -538,6 +551,16 @@ async function confirmChangeLocation(){
   if(newPos===oldPos){ notify('זהו אותו מיקום','warn'); return; }
   const item = data[oldPos]?.items?.[itemId];
   if(!item){ notify('הפריט לא נמצא','warn'); return; }
+  pendingNewLoc = newPos;
+  render();
+}
+// Step 2: user reviewed the preview and pressed the final confirm button — now actually move it
+async function confirmChangeLocation(){
+  if(!changingLocationFor || !pendingNewLoc) return;
+  const {posId:oldPos, itemId} = changingLocationFor;
+  const newPos = pendingNewLoc;
+  const item = data[oldPos]?.items?.[itemId];
+  if(!item){ notify('הפריט לא נמצא','warn'); return; }
   await db.ref(`positions/${fkey(newPos)}/items/${itemId}`).set({...item, updatedAt:new Date().toISOString()});
   await db.ref(`positions/${fkey(oldPos)}/items/${itemId}`).remove();
   const remaining = Object.keys(data[oldPos]?.items||{}).filter(k=>k!==itemId);
@@ -547,7 +570,7 @@ async function confirmChangeLocation(){
     carton: item.cartonBarcode||null
   });
   notify(`✓ הועבר מ-${oldPos} ל-${newPos}`);
-  changingLocationFor=null; newLocScanVal="";
+  changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
   if(tab==='map') mPos=newPos;
   if(tab==='scan') scanPos=newPos;
   render();
@@ -719,40 +742,62 @@ function renderPosView(posId){
     const item = data[posId]?.items?.[assigningCartonFor.itemId];
     html += `<div class="edit-form" style="margin-top:10px">
       <div class="edit-title">שיוך קרטון — ${posId}</div>
-      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">משייך לדגם: <b style="color:var(--acc)">${item?esc(item.sku):''}</b></div>
-      <div class="fg">
+      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">משייך לדגם: <b style="color:var(--acc)">${item?esc(item.sku):''}</b></div>`;
+    if(!pendingCartonBc){
+      html += `<div class="fg">
         <label class="flbl">סרוק ברקוד קרטון</label>
         <div style="display:flex;gap:6px">
           <input id="carton-scan-input" class="finp" style="flex:1" placeholder="C000123..." value="${esc(cartonScanVal)}"
-            oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmCartonAssign()">
+            oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')resolveCartonAssign()">
           <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanCartonCamera()">📷</button>
         </div>
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="confirmCartonAssign()">✓ אישור</button>
+        <button class="btn btn-p" style="flex:1" onclick="resolveCartonAssign()">בדוק ברקוד</button>
+      </div>`;
+    } else {
+      html += `<div style="background:var(--surf);border-radius:var(--rs);padding:10px;margin-bottom:10px;text-align:center">
+        <div style="font-size:11px;color:var(--sub)">ברקוד קרטון שנסרק</div>
+        <div style="font-family:monospace;font-size:18px;font-weight:900;color:var(--acc);margin-top:3px">${esc(pendingCartonBc)}</div>
       </div>
-    </div>`;
+      <div style="display:flex;gap:7px">
+        <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
+        <button class="btn btn-p" style="flex:1" onclick="confirmCartonAssign()">✓ אישור שיוך</button>
+      </div>`;
+    }
+    html += `</div>`;
   }
 
   if(changingLocationFor && changingLocationFor.posId===posId){
     const item = data[posId]?.items?.[changingLocationFor.itemId];
     html += `<div class="edit-form" style="margin-top:10px">
       <div class="edit-title">שינוי מיקום — מ-${posId}</div>
-      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${item?esc(item.sku):''}</b> ${item?`(${item.qty} ${esc(item.unit)})`:''}</div>
-      <div class="fg">
+      <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${item?esc(item.sku):''}</b> ${item?`(${item.qty} ${esc(item.unit)})`:''}</div>`;
+    if(!pendingNewLoc){
+      html += `<div class="fg">
         <label class="flbl">סרוק / הקלד מיקום יעד (ברקוד מדף או מיקום ישיר)</label>
         <div style="display:flex;gap:6px">
           <input id="new-loc-input" class="finp" style="flex:1" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
-            oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation()">
+            oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')resolveChangeLocation()">
           <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanLocationCamera()">📷</button>
         </div>
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelChangeLocation()">ביטול</button>
-        <button class="btn btn-p" style="flex:1" onclick="confirmChangeLocation()">✓ אישור והעברה</button>
+        <button class="btn btn-p" style="flex:1" onclick="resolveChangeLocation()">בדוק מיקום</button>
+      </div>`;
+    } else {
+      html += `<div style="background:var(--surf);border-radius:var(--rs);padding:10px;margin-bottom:10px;text-align:center">
+        <div style="font-size:11px;color:var(--sub)">מעביר אל</div>
+        <div style="font-family:monospace;font-size:18px;font-weight:900;color:var(--acc);margin-top:3px">${esc(pendingNewLoc)}</div>
       </div>
-    </div>`;
+      <div style="display:flex;gap:7px">
+        <button class="btn btn-g" style="flex:1" onclick="cancelChangeLocation()">ביטול</button>
+        <button class="btn btn-p" style="flex:1" onclick="confirmChangeLocation()">✓ אישור והעברה</button>
+      </div>`;
+    }
+    html += `</div>`;
   }
   return html;
 }
@@ -1181,8 +1226,8 @@ function navBtn(id,lbl,svgInner){
 function switchTab(id){
   if(id!==tab){
     editingItem=null;
-    assigningCartonFor=null; cartonScanVal="";
-    changingLocationFor=null; newLocScanVal="";
+    assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null;
+    changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
     if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
     if(id==='emptyReport'){ emptyReportAisle=null; }
@@ -1241,10 +1286,12 @@ window.scrollContentTop = scrollContentTop;
 window.scrollContentBottom = scrollContentBottom;
 window.openCartonAssign = openCartonAssign;
 window.cancelCartonAssign = cancelCartonAssign;
+window.resolveCartonAssign = resolveCartonAssign;
 window.confirmCartonAssign = confirmCartonAssign;
 window.setCartonScanVal = (v)=>{ cartonScanVal = v.toUpperCase(); };
 window.openChangeLocation = openChangeLocation;
 window.cancelChangeLocation = cancelChangeLocation;
+window.resolveChangeLocation = resolveChangeLocation;
 window.confirmChangeLocation = confirmChangeLocation;
 window.setNewLocScanVal = (v)=>{ newLocScanVal = v.toUpperCase(); };
 window.addCalcRow = addCalcRow;
