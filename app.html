@@ -217,6 +217,7 @@ let searchSelected=new Set(); // composite "posId::itemId" keys selected for bul
 
 // ── Carton barcode linking (per item) ──────────────────────────────────────
 let assigningCartonFor=null, cartonScanVal="", pendingCartonBc=null; // assigningCartonFor: {posId,itemId}; pendingCartonBc: validated barcode awaiting final confirm
+let cartonConflictInfo=null; // {bc, ownerPosId, ownerSku} — shown as a prominent modal when a scanned carton is already linked elsewhere
 
 // ── Change location (per item) ─────────────────────────────────────────────
 let changingLocationFor=null, newLocScanVal="", pendingNewLoc=null; // changingLocationFor: {posId,itemId}; pendingNewLoc: validated destination awaiting final confirm
@@ -507,11 +508,18 @@ function resolveCartonAssign(){
   if(!item){ notify('הפריט לא נמצא','warn'); return; }
   const existing = findCartonBarcodeOwner(bc, posId, itemId);
   if(existing){
-    notify(`⚠️ קרטון ${bc} כבר משויך ל-${existing.item.sku} ב-${existing.posId} — כל קרטון יכול להיות משויך למקום אחד בלבד`, 'warn');
+    cartonConflictInfo = { bc, ownerPosId: existing.posId, ownerSku: existing.item.sku };
+    cartonScanVal = "";
+    render();
     return;
   }
   pendingCartonBc = bc;
   render();
+}
+function dismissCartonConflict(){
+  cartonConflictInfo = null;
+  render();
+  setTimeout(()=>{ const el=document.getElementById('carton-scan-input'); if(el) el.focus(); }, 60);
 }
 // Step 2: user reviewed the preview and pressed the final confirm button — now actually write it
 async function confirmCartonAssign(){
@@ -1184,6 +1192,19 @@ function render(){
   }
 
   root.innerHTML = `
+    ${cartonConflictInfo ? `
+    <div class="overlay" style="align-items:center">
+      <div class="modal" style="text-align:center;border:2px solid var(--red)">
+        <div style="font-size:36px;margin-bottom:8px">⚠️</div>
+        <div style="font-size:15px;font-weight:900;color:var(--red);margin-bottom:10px">ברקוד קרטון כבר משויך!</div>
+        <div style="font-size:13px;line-height:1.6;margin-bottom:16px">
+          ברקוד קרטון <span style="font-family:monospace;font-weight:900;color:var(--acc)">${esc(cartonConflictInfo.bc)}</span>
+          כבר משויך למיקום <span style="font-family:monospace;font-weight:900;color:var(--acc)">"${esc(cartonConflictInfo.ownerPosId)}"</span>
+          (${esc(cartonConflictInfo.ownerSku)})
+        </div>
+        <button class="btn btn-p btn-w" onclick="dismissCartonConflict()">הבנתי</button>
+      </div>
+    </div>` : ''}
     <div class="app" dir="rtl">
       <div class="hdr">
         <div class="hdr-t">${hdrLabel()}</div>
@@ -1262,7 +1283,7 @@ function navBtn(id,lbl,svgInner){
 function switchTab(id){
   if(id!==tab){
     editingItem=null;
-    assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null;
+    assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null; cartonConflictInfo=null;
     changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
     if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
@@ -1322,6 +1343,7 @@ window.scrollContentTop = scrollContentTop;
 window.scrollContentBottom = scrollContentBottom;
 window.openCartonAssign = openCartonAssign;
 window.cancelCartonAssign = cancelCartonAssign;
+window.dismissCartonConflict = dismissCartonConflict;
 window.resolveCartonAssign = resolveCartonAssign;
 window.confirmCartonAssign = confirmCartonAssign;
 window.setCartonScanVal = (v)=>{ cartonScanVal = v.toUpperCase(); };
