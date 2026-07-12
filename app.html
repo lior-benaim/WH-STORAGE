@@ -9,6 +9,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -200,6 +201,26 @@ Object.values(CARTON_TYPES).forEach(c=>{
 });
 let calcRows = [{type:"לבן קטן", qty:""}];
 
+// ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
+let emptyReportAisle = null; // null = show aisle summary list; else drill into that aisle
+
+// ── רשימת ליקוט ────────────────────────────────────────────────────────────────
+let pickRows = [{sku:"", qty:""}];
+let pickList = null;       // null until built; else array of {posId,itemId,item} sorted by route
+let pickChecked = new Set(); // "posId::itemId" keys marked as picked
+let pickMissing = [];      // requested SKUs with zero matches found
+let pickShortfall = [];    // requested SKUs found but with less quantity than requested: {sku,needed,found}
+
+function routeCompare(posIdA, posIdB){
+  const ma = posIdA.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
+  const mb = posIdB.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
+  if(!ma || !mb) return posIdA.localeCompare(posIdB);
+  if(ma[1]!==mb[1]) return ma[1] < mb[1] ? -1 : 1;
+  const ca=+ma[2], cb=+mb[2]; if(ca!==cb) return ca-cb;
+  const fa=+ma[3], fb=+mb[3]; if(fa!==fb) return fa-fb;
+  return (+ma[4]) - (+mb[4]);
+}
+
 let data = {};
 let movs = [];
 let tab = "map";
@@ -208,7 +229,6 @@ let scanVal="", scanPos=null, scanErr="";
 
 // editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
 let editingItem=null, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
-let clearPos=null;   // {posId, itemId} pending removal confirmation
 let sq="";
 let searchSelected=new Set(); // composite "posId::itemId" keys selected for bulk removal on the search page
 
@@ -283,6 +303,72 @@ function startListeners(){
 startListeners();
 
 // ── מחשבון מיקומים ────────────────────────────────────────────────────────────
+// ── סריקה דרך מצלמת הטלפון ───────────────────────────────────────────────────
+let _cameraScanner = null;
+function openCameraScan(onResult){
+  const overlay = document.createElement('div');
+  overlay.id = 'camera-scan-overlay';
+  overlay.className = 'overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div style="font-size:14px;font-weight:800;margin-bottom:10px">📷 סריקת ברקוד במצלמה</div>
+      <div id="qr-reader" style="width:100%;border-radius:8px;overflow:hidden;background:#000"></div>
+      <div id="qr-status" style="font-size:11px;color:var(--sub);text-align:center;margin-top:8px">מבקש הרשאת מצלמה...</div>
+      <button class="btn btn-g btn-w" style="margin-top:10px" onclick="closeCameraScan()">ביטול</button>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  if(typeof Html5Qrcode === 'undefined'){
+    const st = document.getElementById('qr-status');
+    if(st) st.textContent = 'ספריית הסריקה לא נטענה — נסי לרענן את הדף';
+    return;
+  }
+
+  _cameraScanner = new Html5Qrcode("qr-reader");
+  _cameraScanner.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 260, height: 140 } },
+    (decodedText) => {
+      const val = decodedText;
+      closeCameraScan();
+      onResult(val);
+    },
+    () => { /* ignore per-frame decode misses */ }
+  ).then(()=>{
+    const st = document.getElementById('qr-status');
+    if(st) st.textContent = 'כווני את המצלמה לברקוד';
+  }).catch(err=>{
+    const st = document.getElementById('qr-status');
+    if(st) st.textContent = 'שגיאת מצלמה — ודאי שנתת הרשאה, או הקלידי ידנית';
+    console.error('Camera scan error', err);
+  });
+}
+function closeCameraScan(){
+  const overlay = document.getElementById('camera-scan-overlay');
+  if(_cameraScanner){
+    _cameraScanner.stop().then(()=>{ _cameraScanner.clear(); _cameraScanner=null; }).catch(()=>{ _cameraScanner=null; });
+  }
+  if(overlay) overlay.remove();
+}
+function scanSkuCamera(){
+  openCameraScan(text=>{ fSKU = (text||'').trim().toUpperCase(); render(); });
+}
+function scanShelfCamera(){
+  openCameraScan(text=>{ scanVal = (text||'').trim().toUpperCase(); doScan(); });
+}
+function scanCartonCamera(){
+  openCameraScan(text=>{ cartonScanVal = (text||'').trim().toUpperCase(); confirmCartonAssign(); });
+}
+function scanLocationCamera(){
+  openCameraScan(text=>{ newLocScanVal = (text||'').trim().toUpperCase(); confirmChangeLocation(); });
+}
+
+function goToPosition(posId){
+  const m = posId.match(/^([A-Z]+)(\d+)-/);
+  if(m){ mAisle=m[1]; mCube=parseInt(m[2]); }
+  mPos=posId; editingItem=null; tab='map'; render();
+}
+
 function addCalcRow(){ calcRows.push({type:"לבן קטן", qty:""}); render(); }
 function removeCalcRow(idx){
   calcRows.splice(idx,1);
@@ -291,6 +377,93 @@ function removeCalcRow(idx){
 }
 function setCalcRowType(idx,val){ calcRows[idx].type = val; render(); }
 function setCalcRowQty(idx,val){ calcRows[idx].qty = val; render(); }
+
+// ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
+function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; render(); }
+function setEmptyReportAisle(a){ emptyReportAisle=a; render(); }
+function backEmptyReportAisleList(){ emptyReportAisle=null; render(); }
+function exportEmptyReport(aisle){
+  const positions = (aisle ? ALL_POS.filter(p=>p.startsWith(aisle)) : ALL_POS).filter(p=>!isOccupied(p));
+  if(positions.length===0){ notify('אין עמדות ריקות לייצוא','warn'); return; }
+  const rows = positions.map(p=>({ 'מיקום': p, 'ברקוד': POS_BC[p] }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = [{wch:16},{wch:12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'עמדות ריקות');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `עמדות_ריקות_${aisle||'הכל'}_${stamp}.xlsx`);
+  notify('✓ יוצאו '+rows.length+' עמדות ריקות');
+}
+
+// ── רשימת ליקוט ────────────────────────────────────────────────────────────────
+function addPickRow(){ pickRows.push({sku:"", qty:""}); render(); }
+function removePickRow(idx){
+  pickRows.splice(idx,1);
+  if(pickRows.length===0) pickRows.push({sku:"", qty:""});
+  render();
+}
+function setPickRowSku(idx,val){ pickRows[idx].sku = val.toUpperCase(); render(); }
+function setPickRowQty(idx,val){ pickRows[idx].qty = val; render(); }
+function scanPickRowCamera(idx){
+  openCameraScan(text=>{ setPickRowSku(idx, (text||'').trim()); });
+}
+
+function buildPickList(){
+  const queries = pickRows
+    .map(r=>({sku:r.sku.trim().toUpperCase(), qty:parseInt(r.qty)||0}))
+    .filter(r=>r.sku);
+  if(queries.length===0){ notify('הזיני לפחות SKU אחד','warn'); return; }
+  const seen = new Set();
+  const results = [];
+  const foundForQuery = {};
+  queries.forEach(q=>foundForQuery[q.sku]=0);
+  ALL_POS.forEach(posId=>{
+    itemsOf(posId).forEach(([itemId,item])=>{
+      const skuUp = item.sku.toUpperCase();
+      const matched = queries.find(q=>skuUp.includes(q.sku));
+      if(matched){
+        const key = posId+'::'+itemId;
+        if(!seen.has(key)){
+          seen.add(key);
+          results.push({posId, itemId, item});
+          foundForQuery[matched.sku] += item.qty;
+        }
+      }
+    });
+  });
+  results.sort((a,b)=>routeCompare(a.posId,b.posId));
+  pickList = results;
+  pickChecked = new Set();
+  pickMissing = queries.filter(q=>foundForQuery[q.sku]===0).map(q=>q.sku);
+  pickShortfall = queries
+    .filter(q=>q.qty>0 && foundForQuery[q.sku]>0 && foundForQuery[q.sku]<q.qty)
+    .map(q=>({sku:q.sku, needed:q.qty, found:foundForQuery[q.sku]}));
+  render();
+}
+function togglePickChecked(key){
+  if(pickChecked.has(key)) pickChecked.delete(key);
+  else pickChecked.add(key);
+  render();
+}
+function resetPickList(){
+  pickList=null; pickChecked=new Set(); pickMissing=[]; pickShortfall=[]; pickRows=[{sku:"",qty:""}];
+  render();
+}
+function exportPickList(){
+  if(!pickList || pickList.length===0){ notify('אין רשימת ליקוט לייצוא','warn'); return; }
+  const rows = pickList.map(r=>({
+    'מיקום': r.posId, 'ברקוד': POS_BC[r.posId], 'SKU': r.item.sku,
+    'שם מוצר': r.item.name||'', 'כמות זמינה': r.item.qty, 'יחידה': r.item.unit,
+    'נלקט': pickChecked.has(r.posId+'::'+r.itemId) ? 'כן' : 'לא'
+  }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  ws['!cols'] = Object.keys(rows[0]).map(k=>({wch:Math.max(k.length,14)}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'רשימת ליקוט');
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `רשימת_ליקוט_${stamp}.xlsx`);
+  notify('✓ יוצאה רשימת ליקוט');
+}
 
 // ── פעולות פריטים ────────────────────────────────────────────────────────────
 function openAddItem(posId){
@@ -343,7 +516,6 @@ async function removeItem(posId, itemId){
   await db.ref('movements/'+mkId()).set({
     ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit
   });
-  clearPos=null;
   notify('✓ '+item.sku+' הוצא מ-'+posId);
   render();
 }
@@ -571,7 +743,10 @@ function renderPosView(posId){
       <div class="edit-title">${isNew?'הוספת דגם':'עדכון פרטים'} — ${posId}</div>
       <div class="fg">
         <label class="flbl">SKU / דגם</label>
-        <input id="f-sku" class="finp" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
+        <div style="display:flex;gap:6px">
+          <input id="f-sku" class="finp" style="flex:1" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
+          <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanSkuCamera()">📷</button>
+        </div>
       </div>
       <div class="fg">
         <label class="flbl">שם מוצר (אופציונלי)</label>
@@ -611,8 +786,11 @@ function renderPosView(posId){
       <div style="font-size:11px;color:var(--sub);margin-bottom:9px">משייך לדגם: <b style="color:var(--acc)">${item?esc(item.sku):''}</b></div>
       <div class="fg">
         <label class="flbl">סרוק ברקוד קרטון</label>
-        <input id="carton-scan-input" class="finp" placeholder="C000123..." value="${esc(cartonScanVal)}"
-          oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmCartonAssign()">
+        <div style="display:flex;gap:6px">
+          <input id="carton-scan-input" class="finp" style="flex:1" placeholder="C000123..." value="${esc(cartonScanVal)}"
+            oninput="setCartonScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmCartonAssign()">
+          <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanCartonCamera()">📷</button>
+        </div>
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelCartonAssign()">ביטול</button>
@@ -628,8 +806,11 @@ function renderPosView(posId){
       <div style="font-size:11px;color:var(--sub);margin-bottom:9px">מעביר: <b style="color:var(--acc)">${item?esc(item.sku):''}</b> ${item?`(${item.qty} ${esc(item.unit)})`:''}</div>
       <div class="fg">
         <label class="flbl">סרוק / הקלד מיקום יעד (ברקוד מדף או מיקום ישיר)</label>
-        <input id="new-loc-input" class="finp" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
-          oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation()">
+        <div style="display:flex;gap:6px">
+          <input id="new-loc-input" class="finp" style="flex:1" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
+            oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')confirmChangeLocation()">
+          <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanLocationCamera()">📷</button>
+        </div>
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelChangeLocation()">ביטול</button>
@@ -650,7 +831,10 @@ function hdrLabel(){
   if(tab==='scan' && scanPos){
     return `<span class="bk" onclick="resetScan()">&#8592; סריקה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${scanPos}</span>`;
   }
-  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב מיקומים'}[tab]||'';
+  if(tab==='emptyReport' && emptyReportAisle){
+    return `<span class="bk" onclick="backEmptyReportAisleList()">&#8592; דוח</span><span>מעבר ${emptyReportAisle}</span>`;
+  }
+  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב מיקומים',pick:'רשימת ליקוט',emptyReport:'📊 עמדות פנויות'}[tab]||'';
 }
 
 function render(){
@@ -745,6 +929,7 @@ function render(){
       <input id="scan-input" class="scan-inp" placeholder="P00001..." value="${esc(scanVal)}"
         oninput="setScanVal(this.value);this.value=scanVal"
         onkeydown="if(event.key==='Enter')doScan()" autocomplete="off">
+      <button class="btn btn-blue btn-w" style="margin-top:8px" onclick="scanShelfCamera()">📷 סרוק במצלמה</button>
       <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:5px">סרוק את הברקוד שעל המדף הפיזי</div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
       <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()">פתח עמדה</button>
@@ -869,6 +1054,118 @@ function render(){
       </div>`;
     }
   }
+  else if(tab==='pick'){
+    if(pickList===null){
+      contentHtml = `<div class="fsec">
+        <div class="sec-ttl">בניית רשימת ליקוט</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">הזיני את ה-SKUs שצריך ללקט (וכמות רצויה, אופציונלי), והמערכת תבנה מסלול הליכה יעיל לפי סדר המחסן</div>`;
+      pickRows.forEach((row,idx)=>{
+        contentHtml += `<div class="frow" style="margin-bottom:9px">
+          <div class="fg" style="flex:2">
+            <label class="flbl">SKU</label>
+            <div style="display:flex;gap:5px">
+              <input class="finp" style="flex:1" placeholder="ABC-123..." value="${esc(row.sku)}" oninput="setPickRowSku(${idx},this.value)">
+              <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanPickRowCamera(${idx})">📷</button>
+            </div>
+          </div>
+          <div class="fg">
+            <label class="flbl">כמות (אופציונלי)</label>
+            <input class="finp" type="number" min="0" inputmode="numeric" placeholder="הכל" value="${esc(row.qty)}" oninput="setPickRowQty(${idx},this.value)">
+          </div>
+        </div>
+        ${pickRows.length>1?`<button class="btn btn-d btn-sm btn-w" style="margin-bottom:9px" onclick="removePickRow(${idx})">הסר שורה</button>`:''}`;
+      });
+      contentHtml += `<button class="btn btn-g btn-w" onclick="addPickRow()" style="margin-bottom:10px">➕ הוסף SKU נוסף</button>
+        <button class="btn btn-p btn-w" onclick="buildPickList()">🔍 בנה מסלול ליקוט</button>
+      </div>`;
+    } else {
+      const pickedCount = pickList.filter(r=>pickChecked.has(r.posId+'::'+r.itemId)).length;
+      contentHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec-ttl" style="margin-bottom:0">מסלול ליקוט (${pickedCount}/${pickList.length} נאספו)</div>
+        <button class="btn btn-blue btn-sm" onclick="exportPickList()">📥 ייצוא</button>
+      </div>`;
+      if(pickMissing.length>0){
+        contentHtml += `<div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--rs);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--red)">⚠️ לא נמצאו במלאי: ${pickMissing.map(esc).join(', ')}</div>`;
+      }
+      if(pickShortfall.length>0){
+        contentHtml += `<div style="background:rgba(240,196,25,.08);border:1px solid rgba(240,196,25,.3);border-radius:var(--rs);padding:10px 12px;margin-bottom:10px;font-size:12px;color:var(--acc)">
+          ⚠️ כמות חלקית: ${pickShortfall.map(s=>`${esc(s.sku)} (נדרש ${s.needed}, נמצא ${s.found})`).join(' · ')}
+        </div>`;
+      }
+      if(pickList.length===0){
+        contentHtml += `<div class="empty">לא נמצאו פריטים תואמים</div>`;
+      } else {
+        contentHtml += pickList.map((r,idx)=>{
+          const key = r.posId+'::'+r.itemId;
+          const checked = pickChecked.has(key);
+          return `<div class="sr" style="align-items:center;${checked?'opacity:.5':''}">
+            <input type="checkbox" ${checked?'checked':''} onclick="event.stopPropagation();togglePickChecked('${key}')" style="width:18px;height:18px;cursor:pointer;flex-shrink:0">
+            <div style="flex:1;cursor:pointer" onclick="goToPosition('${r.posId}')">
+              <div style="font-size:10px;color:var(--mut)">תחנה ${idx+1}</div>
+              <div style="font-family:monospace;font-size:13px;font-weight:900;color:var(--acc)">${r.posId}</div>
+              <div style="font-size:12px;margin-top:1px">${esc(r.item.sku)}${r.item.name?` · ${esc(r.item.name)}`:''}</div>
+              <div style="font-size:11px;color:var(--sub)">${r.item.qty} ${esc(r.item.unit)}</div>
+            </div>
+          </div>`;
+        }).join('');
+      }
+      contentHtml += `<button class="btn btn-g btn-w" onclick="resetPickList()" style="margin-top:10px">🔄 התחל ליקוט חדש</button>`;
+    }
+  }
+  else if(tab==='emptyReport'){
+    if(!emptyReportAisle){
+      const rows = AISLES.map(a=>{
+        const positions = ALL_POS.filter(p=>p.startsWith(a));
+        const free = positions.filter(p=>!isOccupied(p)).length;
+        const pct = Math.round(free/positions.length*100);
+        return `<div class="row" onclick="setEmptyReportAisle('${a}')">
+          <div class="row-id">${a}</div>
+          <div style="flex:1">
+            <div class="row-meta">${free}/${positions.length} פנויות</div>
+            <div class="fill-bar"><div class="fill-inner" style="width:${pct}%;background:var(--grn)"></div></div>
+          </div>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);flex-shrink:0"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>`;
+      }).join('');
+      const totalFree = ALL_POS.filter(p=>!isOccupied(p)).length;
+      contentHtml = `<div class="stats">
+        <div class="stat" style="flex:1"><div class="stat-n">${totalFree}</div><div class="stat-l">עמדות פנויות בסה"כ</div></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="sec-ttl" style="margin-bottom:0">פנויות לפי מעבר</div>
+        <button class="btn btn-blue btn-sm" onclick="exportEmptyReport()">📥 ייצוא הכל</button>
+      </div>
+      <div class="list">${rows}</div>`;
+    } else {
+      const a = emptyReportAisle;
+      let cubesList = CUBES.map(c=>{
+        const positions = ALL_POS.filter(p=>p.startsWith(`${a}${c}-`));
+        const free = positions.filter(p=>!isOccupied(p));
+        return {c, total:positions.length, free};
+      }).filter(x=>x.free.length>0);
+      cubesList.sort((x,y)=>y.free.length-x.free.length);
+
+      contentHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="sec-ttl" style="margin-bottom:0">מעבר ${a} — עמדות פנויות (ממוין לפי כמות)</div>
+        <button class="btn btn-blue btn-sm" onclick="exportEmptyReport('${a}')">📥 ייצוא</button>
+      </div>`;
+
+      if(cubesList.length===0){
+        contentHtml += `<div class="empty">כל העמדות במעבר זה תפוסות</div>`;
+      } else {
+        contentHtml += cubesList.map(({c,total,free})=>{
+          const posLabels = free.map(p=>`<span class="chip" style="cursor:pointer" onclick="goToPosition('${p}')">${p.slice(-5)}</span>`).join(' ');
+          return `<div class="fsec">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+              <div class="row-id">קובייה ${c}</div>
+              <div class="row-meta" style="flex:none">${free.length}/${total} פנויות</div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">${posLabels}</div>
+          </div>`;
+        }).join('');
+      }
+    }
+  }
   else if(tab==='log'){
     if(!movs.length){
       contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
@@ -948,6 +1245,8 @@ function render(){
         ${navBtn('scan','סריקה','<rect x="2" y="4" width="3" height="4" rx=".5"/><rect x="9.5" y="4" width="3" height="4" rx=".5"/><rect x="17" y="4" width="3" height="4" rx=".5"/><rect x="2" y="11" width="18" height="2" rx=".5"/><rect x="2" y="16" width="3" height="4" rx=".5"/><rect x="9.5" y="16" width="3" height="4" rx=".5"/><rect x="17" y="16" width="3" height="4" rx=".5"/>')}
         ${navBtn('search','חיפוש','<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>')}
         ${navBtn('calc','חישוב','<path d="M21.3 8.7 8.7 21.3c-.4.4-1 .4-1.4 0l-4.6-4.6c-.4-.4-.4-1 0-1.4L15.3 2.7c.4-.4 1-.4 1.4 0l4.6 4.6c.4.4.4 1 0 1.4Z"/><path d="m7.5 10.5 2 2"/><path d="m10.5 7.5 2 2"/><path d="m13.5 4.5 2 2"/><path d="m4.5 13.5 2 2"/>')}
+        ${navBtn('emptyReport','פנוי','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>')}
+        ${navBtn('pick','ליקוט','<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>')}
         ${navBtn('log','יומן','<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>')}
         ${navBtn('settings','הגדרות','<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l-.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>')}
       </nav>
@@ -1003,6 +1302,7 @@ function switchTab(id){
     changingLocationFor=null; newLocScanVal="";
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
     if(id==='scan'){ scanPos=null; scanVal=''; scanErr=''; }
+    if(id==='emptyReport'){ emptyReportAisle=null; }
   }
   tab=id;
   render();
@@ -1068,6 +1368,24 @@ window.addCalcRow = addCalcRow;
 window.removeCalcRow = removeCalcRow;
 window.setCalcRowType = setCalcRowType;
 window.setCalcRowQty = setCalcRowQty;
+window.goToPosition = goToPosition;
+window.setEmptyReportAisle = setEmptyReportAisle;
+window.backEmptyReportAisleList = backEmptyReportAisleList;
+window.exportEmptyReport = exportEmptyReport;
+window.addPickRow = addPickRow;
+window.removePickRow = removePickRow;
+window.setPickRowSku = setPickRowSku;
+window.setPickRowQty = setPickRowQty;
+window.scanPickRowCamera = scanPickRowCamera;
+window.buildPickList = buildPickList;
+window.togglePickChecked = togglePickChecked;
+window.resetPickList = resetPickList;
+window.exportPickList = exportPickList;
+window.closeCameraScan = closeCameraScan;
+window.scanSkuCamera = scanSkuCamera;
+window.scanShelfCamera = scanShelfCamera;
+window.scanCartonCamera = scanCartonCamera;
+window.scanLocationCamera = scanLocationCamera;
 
 render();
 
