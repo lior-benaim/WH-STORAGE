@@ -430,11 +430,6 @@ function getAllSkusSummary(){
   });
   return Object.values(map).sort((a,b)=>a.sku.localeCompare(b.sku));
 }
-function setPickActiveDropdown(idx){
-  if(pickActiveDropdown===idx) return; // already open for this row — avoid a redundant render on every re-focus after each keystroke
-  pickActiveDropdown = idx;
-  render();
-}
 function scheduleClosePickDropdown(idx){
   setTimeout(()=>{ if(pickActiveDropdown===idx){ pickActiveDropdown=null; render(); } }, 150);
 }
@@ -1117,7 +1112,7 @@ function render(){
             <div style="display:flex;gap:5px">
               <div style="position:relative;flex:1">
                 <input id="pick-sku-${idx}" class="finp" style="width:100%" placeholder="הקלד אותיות ראשונות..." value="${esc(row.sku)}"
-                  oninput="setPickRowSku(${idx},this.value)" onfocus="setPickActiveDropdown(${idx})" onblur="scheduleClosePickDropdown(${idx})" autocomplete="off">
+                  oninput="setPickRowSku(${idx},this.value)" onblur="scheduleClosePickDropdown(${idx})" autocomplete="off">
                 ${pickActiveDropdown===idx ? renderPickSuggestions(idx, row.sku) : ''}
               </div>
               <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanPickRowCamera(${idx})">📷</button>
@@ -1438,7 +1433,6 @@ window.removePickRow = removePickRow;
 window.setPickRowSku = setPickRowSku;
 window.setPickRowQty = setPickRowQty;
 window.scanPickRowCamera = scanPickRowCamera;
-window.setPickActiveDropdown = setPickActiveDropdown;
 window.scheduleClosePickDropdown = scheduleClosePickDropdown;
 window.selectPickSuggestion = selectPickSuggestion;
 window.buildPickList = buildPickList;
