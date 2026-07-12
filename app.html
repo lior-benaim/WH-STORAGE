@@ -345,9 +345,6 @@ function closeCameraScan(){
   }
   if(overlay) overlay.remove();
 }
-function scanSkuCamera(){
-  openCameraScan(text=>{ fSKU = (text||'').trim().toUpperCase(); render(); });
-}
 function scanShelfCamera(){
   openCameraScan(text=>{ scanVal = (text||'').trim().toUpperCase(); doScan(); });
 }
@@ -684,11 +681,8 @@ function renderPosView(posId){
     html += `<div class="edit-form" style="margin-top:10px">
       <div class="edit-title">${isNew?'הוספת דגם':'עדכון פרטים'} — ${posId}</div>
       <div class="fg">
-        <label class="flbl">SKU / דגם</label>
-        <div style="display:flex;gap:6px">
-          <input id="f-sku" class="finp" style="flex:1" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
-          <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanSkuCamera()">📷</button>
-        </div>
+        <label class="flbl">SKU / דגם (הקלדה ידנית)</label>
+        <input id="f-sku" class="finp" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
       </div>
       <div class="fg">
         <label class="flbl">שם מוצר (אופציונלי)</label>
@@ -1262,7 +1256,6 @@ window.setEmptyReportAisle = setEmptyReportAisle;
 window.backEmptyReportAisleList = backEmptyReportAisleList;
 window.exportEmptyReport = exportEmptyReport;
 window.closeCameraScan = closeCameraScan;
-window.scanSkuCamera = scanSkuCamera;
 window.scanShelfCamera = scanShelfCamera;
 window.scanCartonCamera = scanCartonCamera;
 window.scanLocationCamera = scanLocationCamera;
