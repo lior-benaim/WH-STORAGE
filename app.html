@@ -979,18 +979,41 @@ function render(){
     }
   }
   else if(tab==='calc'){
-    contentHtml = `<div class="fsec">
+    contentHtml = `<div class="fsec" style="text-align:center">
       <div class="sec-ttl">מידות עמדה בודדת</div>
-      <div class="info-row"><span>עומק</span><span class="info-val">${SHELF.depth} ס"מ</span></div>
-      <div class="info-row"><span>רוחב</span><span class="info-val">${SHELF.width} ס"מ</span></div>
-      <div class="info-row"><span>גובה</span><span class="info-val">${SHELF.height} ס"מ</span></div>
+      <svg viewBox="0 0 300 175" style="width:100%;max-width:260px;display:block;margin:6px auto">
+        <polygon points="60,55 200,55 235,25 95,25" fill="rgba(240,196,25,.15)" stroke="#F0C419" stroke-width="1.5"/>
+        <polygon points="200,55 235,25 235,95 200,125" fill="rgba(240,196,25,.08)" stroke="#F0C419" stroke-width="1.5"/>
+        <rect x="60" y="55" width="140" height="70" fill="#1F1F1F" stroke="#F0C419" stroke-width="2"/>
+        <line x1="60" y1="136" x2="200" y2="136" stroke="#888" stroke-width="1"/>
+        <line x1="60" y1="132" x2="60" y2="140" stroke="#888" stroke-width="1"/>
+        <line x1="200" y1="132" x2="200" y2="140" stroke="#888" stroke-width="1"/>
+        <text x="130" y="154" text-anchor="middle" fill="#F0C419" font-size="15" font-weight="700">${SHELF.width} ס"מ</text>
+        <text x="130" y="168" text-anchor="middle" fill="#888" font-size="10">רוחב</text>
+        <text x="42" y="94" text-anchor="middle" fill="#F0C419" font-size="15" font-weight="700">${SHELF.height}</text>
+        <text x="42" y="107" text-anchor="middle" fill="#888" font-size="10">גובה</text>
+        <text x="257" y="50" text-anchor="middle" fill="#F0C419" font-size="15" font-weight="700">${SHELF.depth}</text>
+        <text x="257" y="63" text-anchor="middle" fill="#888" font-size="10">עומק</text>
+      </svg>
     </div>`;
 
     contentHtml += `<div class="sec-ttl">קיבולת לפי סוג קרטון</div>
-      <div class="fsec">` +
-      Object.entries(CARTON_TYPES).map(([name,c])=>
-        `<div class="info-row"><span>${name}</span><span class="info-val">${c.capacity} לעמדה</span></div>`
-      ).join('') +
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px">` +
+      Object.entries(CARTON_TYPES).map(([name,c])=>{
+        const isWhite = name.includes('לבן');
+        const boxFill = isWhite ? '#E8E4D8' : '#8B5E3C';
+        const boxStroke = isWhite ? '#B8B4A8' : '#5C3B22';
+        return `<div style="background:var(--surf);border:1px solid var(--b);border-radius:9px;padding:11px;text-align:center">
+          <svg viewBox="0 0 40 34" style="width:40px;height:34px">
+            <rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/>
+            <polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/>
+            <line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>
+          </svg>
+          <div style="font-size:11.5px;font-weight:700;margin-top:5px">${name}</div>
+          <div style="font-size:24px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:3px">${c.capacity}</div>
+          <div style="font-size:9.5px;color:var(--sub)">קרטונים לעמדה</div>
+        </div>`;
+      }).join('') +
       `</div>`;
 
     contentHtml += `<div class="sec-ttl">חישוב מיקומים נדרשים</div>`;
@@ -999,6 +1022,9 @@ function render(){
       const c = CARTON_TYPES[row.type];
       const qty = parseInt(row.qty)||0;
       const posNeeded = qty>0 ? Math.ceil(qty/c.capacity) : 0;
+      const isWhite = row.type.includes('לבן');
+      const boxFill = isWhite ? '#E8E4D8' : '#8B5E3C';
+      const boxStroke = isWhite ? '#B8B4A8' : '#5C3B22';
       contentHtml += `<div class="fsec">
         <div class="frow">
           <div class="fg">
@@ -1014,9 +1040,16 @@ function render(){
           </div>
         </div>
         <div style="font-size:11px;color:var(--sub);margin-bottom:8px">קיבולת לעמדה: <b style="color:var(--acc)">${c.capacity}</b> קרטונים (${c.perWidth} לרוחב × ${c.perDepth} לעומק × ${c.perHeight} לגובה)</div>
-        ${qty>0?`<div style="background:var(--surf);border-radius:var(--rs);padding:10px;text-align:center;margin-bottom:8px">
-          <div style="font-size:26px;font-weight:900;color:var(--acc)">${posNeeded}</div>
-          <div style="font-size:11px;color:var(--sub)">מיקומים נדרשים</div>
+        ${qty>0?`<div style="background:var(--surf);border-radius:var(--rs);padding:14px 10px;text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:14px">
+          <svg viewBox="0 0 40 34" style="width:34px;height:29px;flex-shrink:0">
+            <rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/>
+            <polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/>
+            <line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>
+          </svg>
+          <div>
+            <div style="font-size:30px;font-weight:900;color:var(--acc);line-height:1">${posNeeded}</div>
+            <div style="font-size:11px;color:var(--sub)">מיקומים נדרשים</div>
+          </div>
         </div>`:''}
         ${calcRows.length>1?`<button class="btn btn-d btn-sm btn-w" onclick="removeCalcRow(${idx})">הסר שורה</button>`:''}
       </div>`;
@@ -1032,7 +1065,8 @@ function render(){
     if(totalQty>0){
       contentHtml += `<div class="fsec" style="text-align:center">
         <div class="sec-ttl">סה"כ כללי</div>
-        <div style="font-size:34px;font-weight:900;color:var(--acc)">${totalPos}</div>
+        <div style="font-size:40px;line-height:1">📍</div>
+        <div style="font-size:40px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:2px">${totalPos}</div>
         <div style="font-size:12px;color:var(--sub)">מיקומים נדרשים סה"כ (${totalQty} קרטונים)</div>
       </div>`;
     }
