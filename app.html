@@ -210,6 +210,7 @@ let pickList = null;       // null until built; else array of {posId,itemId,item
 let pickChecked = new Set(); // "posId::itemId" keys marked as picked
 let pickMissing = [];      // requested SKUs with zero matches found
 let pickShortfall = [];    // requested SKUs found but with less quantity than requested: {sku,needed,found}
+let pickActiveDropdown = null; // row index whose SKU autocomplete dropdown is currently open
 
 function routeCompare(posIdA, posIdB){
   const ma = posIdA.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
@@ -402,10 +403,44 @@ function removePickRow(idx){
   if(pickRows.length===0) pickRows.push({sku:"", qty:""});
   render();
 }
-function setPickRowSku(idx,val){ pickRows[idx].sku = val.toUpperCase(); render(); }
+function setPickRowSku(idx,val){ pickRows[idx].sku = val.toUpperCase(); pickActiveDropdown = idx; render(); }
 function setPickRowQty(idx,val){ pickRows[idx].qty = val; render(); }
 function scanPickRowCamera(idx){
   openCameraScan(text=>{ setPickRowSku(idx, (text||'').trim()); });
+}
+function getAllSkusSummary(){
+  const map = {};
+  Object.values(data).forEach(posData=>{
+    Object.values(posData.items||{}).forEach(item=>{
+      if(!map[item.sku]) map[item.sku] = {sku:item.sku, name:item.name||'', totalQty:0};
+      map[item.sku].totalQty += item.qty;
+    });
+  });
+  return Object.values(map).sort((a,b)=>a.sku.localeCompare(b.sku));
+}
+function setPickActiveDropdown(idx){ pickActiveDropdown = idx; render(); }
+function scheduleClosePickDropdown(idx){
+  setTimeout(()=>{ if(pickActiveDropdown===idx){ pickActiveDropdown=null; render(); } }, 150);
+}
+function selectPickSuggestion(idx, sku){
+  pickRows[idx].sku = sku;
+  pickActiveDropdown = null;
+  render();
+}
+function renderPickSuggestions(idx, query){
+  const q = query.trim().toUpperCase();
+  if(!q) return '';
+  const matches = getAllSkusSummary().filter(s=>s.sku.startsWith(q)).slice(0,8);
+  if(matches.length===0) return '';
+  return `<div style="position:absolute;top:100%;right:0;left:0;background:var(--card);border:1px solid var(--acc);border-radius:var(--rs);max-height:220px;overflow-y:auto;z-index:200;margin-top:2px;box-shadow:0 8px 20px rgba(0,0,0,.5)">
+    ${matches.map(s=>`<div onmousedown="selectPickSuggestion(${idx},'${s.sku}')" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--b);display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div>
+        <div style="font-family:monospace;font-size:12px;font-weight:800;color:var(--acc)">${esc(s.sku)}</div>
+        ${s.name?`<div style="font-size:11px;color:var(--sub)">${esc(s.name)}</div>`:''}
+      </div>
+      <div style="font-size:11px;color:var(--sub);flex-shrink:0">${s.totalQty} יח׳</div>
+    </div>`).join('')}
+  </div>`;
 }
 
 function buildPickList(){
@@ -446,7 +481,7 @@ function togglePickChecked(key){
   render();
 }
 function resetPickList(){
-  pickList=null; pickChecked=new Set(); pickMissing=[]; pickShortfall=[]; pickRows=[{sku:"",qty:""}];
+  pickList=null; pickChecked=new Set(); pickMissing=[]; pickShortfall=[]; pickRows=[{sku:"",qty:""}]; pickActiveDropdown=null;
   render();
 }
 function exportPickList(){
@@ -1064,7 +1099,11 @@ function render(){
           <div class="fg" style="flex:2">
             <label class="flbl">SKU</label>
             <div style="display:flex;gap:5px">
-              <input class="finp" style="flex:1" placeholder="ABC-123..." value="${esc(row.sku)}" oninput="setPickRowSku(${idx},this.value)">
+              <div style="position:relative;flex:1">
+                <input id="pick-sku-${idx}" class="finp" style="width:100%" placeholder="הקלד אותיות ראשונות..." value="${esc(row.sku)}"
+                  oninput="setPickRowSku(${idx},this.value)" onfocus="setPickActiveDropdown(${idx})" onblur="scheduleClosePickDropdown(${idx})" autocomplete="off">
+                ${pickActiveDropdown===idx ? renderPickSuggestions(idx, row.sku) : ''}
+              </div>
               <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanPickRowCamera(${idx})">📷</button>
             </div>
           </div>
@@ -1377,6 +1416,9 @@ window.removePickRow = removePickRow;
 window.setPickRowSku = setPickRowSku;
 window.setPickRowQty = setPickRowQty;
 window.scanPickRowCamera = scanPickRowCamera;
+window.setPickActiveDropdown = setPickActiveDropdown;
+window.scheduleClosePickDropdown = scheduleClosePickDropdown;
+window.selectPickSuggestion = selectPickSuggestion;
 window.buildPickList = buildPickList;
 window.togglePickChecked = togglePickChecked;
 window.resetPickList = resetPickList;
