@@ -349,6 +349,9 @@ function closeCameraScan(){
 function scanShelfCamera(){
   openCameraScan(text=>{ scanVal = (text||'').trim().toUpperCase(); doScan(); });
 }
+function scanSearchCamera(){
+  openCameraScan(text=>{ setSQ((text||'').trim().toUpperCase()); });
+}
 function scanCartonCamera(){
   openCameraScan(text=>{ cartonScanVal = (text||'').trim().toUpperCase(); resolveCartonAssign(); });
 }
@@ -935,7 +938,7 @@ function render(){
     if(sq.length>=2){
       ALL_POS.forEach(posId=>{
         itemsOf(posId).forEach(([itemId,item])=>{
-          if(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow)){
+          if(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow) || (item.cartonBarcode||'').includes(qUp)){
             results.push({posId, itemId, item});
           }
         });
@@ -946,8 +949,11 @@ function render(){
     const allSelected = results.length>0 && results.every(r=>searchSelected.has(r.posId+'::'+r.itemId));
 
     contentHtml = `<div class="fg" style="margin-bottom:11px">
-      <input id="search-input" class="finp rtl" placeholder="חפש דגם / SKU..." value="${esc(sq)}"
-        oninput="setSQ(this.value)" style="font-size:15px;padding:10px 11px">
+      <div style="display:flex;gap:6px">
+        <input id="search-input" class="finp rtl" style="flex:1;font-size:15px;padding:10px 11px" placeholder="חפש דגם / SKU / מספר קרטון..." value="${esc(sq)}"
+          oninput="setSQ(this.value)">
+        <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanSearchCamera()">📷</button>
+      </div>
     </div>`;
 
     if(sq.length>=2 && results.length===0) contentHtml += `<div class="empty">לא נמצאו תוצאות עבור "${esc(sq)}"</div>`;
@@ -976,11 +982,12 @@ function render(){
           ${r.item.name?`<div style="font-size:11px;margin-top:1px">${esc(r.item.name)}</div>`:''}
           <div style="font-size:11px;color:var(--sub);margin-top:1px">${r.item.qty} ${esc(r.item.unit)}</div>
           <div style="font-size:10px;color:var(--mut);font-family:monospace;margin-top:1px">${r.posId} · ${POS_BC[r.posId]}</div>
+          ${r.item.cartonBarcode?`<div style="font-size:10px;color:var(--acc);font-family:monospace;margin-top:1px">📦 ${esc(r.item.cartonBarcode)}</div>`:''}
         </div>
       </div>`;
     }).join('');
 
-    if(!sq) contentHtml += `<div style="font-size:12px;color:var(--mut);text-align:center;margin-top:32px">הקלד שם דגם או SKU לחיפוש</div>`;
+    if(!sq) contentHtml += `<div style="font-size:12px;color:var(--mut);text-align:center;margin-top:32px">הקלד שם דגם, SKU, או מספר קרטון לחיפוש</div>`;
 
     if(searchSelected.size>0){
       contentHtml += `<div style="height:56px"></div>`; // spacer so the floating bulk bar doesn't cover the last row
@@ -1362,6 +1369,7 @@ window.backEmptyReportAisleList = backEmptyReportAisleList;
 window.exportEmptyReport = exportEmptyReport;
 window.closeCameraScan = closeCameraScan;
 window.scanShelfCamera = scanShelfCamera;
+window.scanSearchCamera = scanSearchCamera;
 window.scanCartonCamera = scanCartonCamera;
 window.scanLocationCamera = scanLocationCamera;
 
