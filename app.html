@@ -737,7 +737,7 @@ function renderPosView(posId){
         <label class="flbl">שם מוצר (אופציונלי — אפשר כמה שמות, למשל קרטון MIX)</label>
         ${fNameParts.map((part,idx)=>`
           <div style="display:flex;gap:6px;margin-bottom:6px">
-            <input class="finp rtl" style="flex:1" placeholder="${idx===0?'חולצה שחורה M...':'שם דגם נוסף...'}" value="${esc(part)}" oninput="setFNamePart(${idx},this.value)">
+            <input id="f-name-part-${idx}" class="finp rtl" style="flex:1" placeholder="${idx===0?'חולצה שחורה M...':'שם דגם נוסף...'}" value="${esc(part)}" oninput="setFNamePart(${idx},this.value)">
             ${fNameParts.length>1?`<button type="button" class="btn btn-d btn-sm" style="flex-shrink:0" onclick="removeFNamePart(${idx})">✕</button>`:''}
           </div>`).join('')}
         ${fNameParts.length<3?`<button type="button" class="btn btn-g btn-sm" onclick="addFNamePart()">➕ הוסף שם מוצר</button>`:''}
@@ -745,7 +745,7 @@ function renderPosView(posId){
       <div class="frow">
         <div class="fg">
           <label class="flbl">כמות</label>
-          <input class="finp" type="text" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
+          <input id="f-qty" class="finp" type="text" inputmode="numeric" placeholder="0" value="${esc(fQty)}"
             oninput="setFQty(this.value)" onkeydown="if(event.key==='Enter')doSaveItem()" style="font-size:16px">
         </div>
         <div class="fg">
@@ -760,7 +760,7 @@ function renderPosView(posId){
       </div>
       <div class="fg">
         <label class="flbl">הערה</label>
-        <input class="finp rtl" placeholder="עונה, צבע, מידה..." value="${esc(fNote)}" oninput="setFNote(this.value)">
+        <input id="f-note" class="finp rtl" placeholder="עונה, צבע, מידה..." value="${esc(fNote)}" oninput="setFNote(this.value)">
       </div>
       <div style="display:flex;gap:7px">
         <button class="btn btn-g" style="flex:1" onclick="cancelEditItem()">ביטול</button>
