@@ -211,7 +211,7 @@ let mAisle=null, mCube=null, mPos=null;
 let scanVal="", scanPos=null, scanErr="";
 
 // editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
-let editingItem=null, fSKU="", fName="", fQty="", fUnit="יחידות", fNote="";
+let editingItem=null, fSKU="", fNameParts=[""], fQty="", fUnit="יחידות", fNote=""; // fNameParts: up to 3 product-name entries, joined with ", " on save
 let sq="";
 let searchSelected=new Set(); // composite "posId::itemId" keys selected for bulk removal on the search page
 
@@ -393,7 +393,7 @@ function exportEmptyReport(aisle){
 
 // ── פעולות פריטים ────────────────────────────────────────────────────────────
 function openAddItem(posId){
-  fSKU=""; fName=""; fQty=""; fUnit="יחידות"; fNote="";
+  fSKU=""; fNameParts=[""]; fQty=""; fUnit="יחידות"; fNote="";
   editingItem = {posId, itemId:null};
   assigningCartonFor=null; changingLocationFor=null;
   render();
@@ -401,13 +401,27 @@ function openAddItem(posId){
 }
 function openEditItem(posId, itemId){
   const item = data[posId]?.items?.[itemId];
-  fSKU = item?.sku||''; fName = item?.name||''; fQty = item?.qty?String(item.qty):''; fUnit = item?.unit||'יחידות'; fNote = item?.note||'';
+  fSKU = item?.sku||'';
+  fNameParts = item?.name ? item.name.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  if(fNameParts.length===0) fNameParts=[""];
+  fQty = item?.qty?String(item.qty):''; fUnit = item?.unit||'יחידות'; fNote = item?.note||'';
   editingItem = {posId, itemId};
   assigningCartonFor=null; changingLocationFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
 }
 function cancelEditItem(){ editingItem=null; render(); }
+function setFNamePart(idx,val){ fNameParts[idx]=val; render(); }
+function addFNamePart(){
+  if(fNameParts.length>=3) return;
+  fNameParts.push("");
+  render();
+}
+function removeFNamePart(idx){
+  fNameParts.splice(idx,1);
+  if(fNameParts.length===0) fNameParts=[""];
+  render();
+}
 
 async function doSaveItem(){
   if(!editingItem) return;
@@ -417,8 +431,9 @@ async function doSaveItem(){
   if(isNaN(qty)||qty<=0){ notify('חובה להזין כמות תקינה','warn'); return; }
   const id = itemId || mkId();
   const prevItem = itemId ? data[posId]?.items?.[itemId] : null;
+  const joinedName = fNameParts.map(s=>s.trim()).filter(Boolean).join(', ');
   const entry = {
-    sku:fSKU.trim().toUpperCase(), name:fName.trim(), qty, unit:fUnit, note:fNote.trim(),
+    sku:fSKU.trim().toUpperCase(), name:joinedName, qty, unit:fUnit, note:fNote.trim(),
     cartonBarcode: prevItem?.cartonBarcode || null,
     updatedAt:new Date().toISOString()
   };
@@ -719,8 +734,13 @@ function renderPosView(posId){
         <input id="f-sku" class="finp" placeholder="ABC-123..." value="${esc(fSKU)}" oninput="setFSKU(this.value);this.value=fSKU">
       </div>
       <div class="fg">
-        <label class="flbl">שם מוצר (אופציונלי)</label>
-        <input class="finp rtl" placeholder="חולצה שחורה M..." value="${esc(fName)}" oninput="setFName(this.value)">
+        <label class="flbl">שם מוצר (אופציונלי — אפשר כמה שמות, למשל קרטון MIX)</label>
+        ${fNameParts.map((part,idx)=>`
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <input class="finp rtl" style="flex:1" placeholder="${idx===0?'חולצה שחורה M...':'שם דגם נוסף...'}" value="${esc(part)}" oninput="setFNamePart(${idx},this.value)">
+            ${fNameParts.length>1?`<button type="button" class="btn btn-d btn-sm" style="flex-shrink:0" onclick="removeFNamePart(${idx})">✕</button>`:''}
+          </div>`).join('')}
+        ${fNameParts.length<3?`<button type="button" class="btn btn-g btn-sm" onclick="addFNamePart()">➕ הוסף שם מוצר</button>`:''}
       </div>
       <div class="frow">
         <div class="fg">
@@ -1339,7 +1359,9 @@ window.backCube = ()=>{ mCube=null; render(); };
 window.backAisle = ()=>{ mAisle=null; render(); };
 window.backFromPos = ()=>{ mPos=null; editingItem=null; render(); };
 window.setFSKU = (v)=>{ fSKU = v.toUpperCase(); };
-window.setFName = (v)=>{ fName = v; };
+window.setFNamePart = setFNamePart;
+window.addFNamePart = addFNamePart;
+window.removeFNamePart = removeFNamePart;
 window.setFQty = (v)=>{ fQty = v.replace(/[^0-9]/g,''); };
 window.setFUnit = (v)=>{ fUnit = v; };
 window.setFNote = (v)=>{ fNote = v; };
