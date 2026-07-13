@@ -922,7 +922,7 @@ function render(){
         oninput="setScanVal(this.value);this.value=scanVal"
         onkeydown="if(event.key==='Enter')doScan()" autocomplete="off">
       <button class="btn btn-blue btn-w" style="margin-top:8px" onclick="scanShelfCamera()">📷 סרוק במצלמה</button>
-      <div style="font-size:11px;color:var(--mut);text-align:center;margin-top:5px">
+      <div style="font-size:11px;color:var(--txt);text-align:center;margin-top:5px">
         סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר גם את המיקום (כמו ZA1-01-02) וגם את קוד הברקוד (כמו P00001)
       </div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
