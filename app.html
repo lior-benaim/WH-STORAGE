@@ -251,8 +251,12 @@ function itemsOf(posId){
 function isOccupied(posId){ return itemsOf(posId).length > 0; }
 
 // ── Firebase listeners ────────────────────────────────────────────────────────
-// Note: access control is handled entirely by the Vercel login (username/password),
-// so we connect directly to Realtime Database without requiring Firebase Anonymous Auth.
+// Security: the database itself now requires a valid Firebase Auth session
+// (Realtime Database → Rules must be set to "auth != null" for read/write).
+// We sign in anonymously purely to satisfy that rule — real access control for
+// people is the separate Vercel login gate (username/password) that already ran
+// before this code executes; this anonymous session just lets the already-logged-in
+// app talk to the database once the site's own login has been passed.
 let listenersStarted=false;
 function startListeners(){
   if(listenersStarted) return;
@@ -277,14 +281,20 @@ function startListeners(){
     });
     data = migrated;
     render();
-  }, err=>{ console.error('positions listener error', err); notify('שגיאת חיבור למסד הנתונים','warn'); });
-  db.ref('movements').on('value', snap=>{
+  }, err=>{ console.error('positions listener error', err); notify('שגיאת חיבור למסד הנתונים — נסי לרענן','warn'); });
+  // Only pull the last 500 movements from the SERVER (not the whole history),
+  // so the app doesn't get slower and slower over months/years of daily use.
+  db.ref('movements').orderByChild('ts').limitToLast(500).on('value', snap=>{
     const raw = snap.val() || {};
-    movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts)).slice(0,500);
+    movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts));
     render();
   }, err=>{ console.error('movements listener error', err); });
 }
-startListeners();
+auth.onAuthStateChanged(user=>{ if(user) startListeners(); });
+auth.signInAnonymously().catch(err=>{
+  console.error('Anonymous auth failed', err);
+  notify('⚠️ שגיאת אבטחה בהתחברות למסד הנתונים — ודאי ש-Anonymous Auth מופעל ב-Firebase','error');
+});
 
 // ── מחשבון מיקומים ────────────────────────────────────────────────────────────
 // ── סריקה דרך מצלמת הטלפון ───────────────────────────────────────────────────
