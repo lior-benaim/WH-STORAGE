@@ -608,6 +608,8 @@ function doScan(){
   scanErr='';
   if(POS_BC_REV[v]){ openPos(POS_BC_REV[v]); scanVal=''; render(); return; }
   if(POS_BC[v]){ openPos(v); scanVal=''; render(); return; }
+  const owner = findCartonBarcodeOwner(v, null, null);
+  if(owner){ openPos(owner.posId); scanVal=''; notify(`📦 קרטון ${v} נמצא ב-${owner.posId}`); render(); return; }
   scanErr = 'לא נמצא ברקוד: "'+v+'"';
   scanVal='';
   render();
@@ -943,7 +945,7 @@ function render(){
         onkeydown="if(event.key==='Enter')doScan()" autocomplete="off">
       <button class="btn btn-blue btn-w" style="margin-top:8px" onclick="scanShelfCamera()">📷 סרוק במצלמה</button>
       <div style="font-size:11px;color:var(--txt);text-align:center;margin-top:5px">
-        סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר גם את המיקום (כמו ZA1-01-02) וגם את קוד הברקוד (כמו P00001)
+        סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר את המיקום (כמו ZA1-01-02), קוד הברקוד (כמו P00001), או אפילו ברקוד קרטון (כמו C000001) — יקפוץ ישר למיקום שאליו הוא משויך
       </div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
       <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()">פתח עמדה</button>
