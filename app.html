@@ -125,15 +125,22 @@ select.finp{cursor:pointer}
   try {
     const res = await fetch('/api/verify');
     if (!res.ok) { window.location.href = '/login.html'; return; }
+    const identity = await res.json();
     document.getElementById('gate').style.display = 'none';
     document.getElementById('root').style.display = 'block';
-    initApp();
+    initApp(identity);
   } catch {
     window.location.href = '/login.html';
   }
 })();
 
-function initApp(){
+function initApp(identity){
+const CURRENT_USER = {
+  name: (identity && identity.name) || '',
+  phone: (identity && identity.phone) || '',
+  isAdmin: !!(identity && identity.isAdmin)
+};
+const currentUserLabel = () => CURRENT_USER.name || CURRENT_USER.phone || 'לא ידוע';
 
 // ── Firebase config ─────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -205,6 +212,9 @@ let calcRows = [{type:"לבן קטן", qty:""}];
 let emptyReportAisle = null; // null = show aisle summary list; else drill into that aisle
 
 let data = {};
+// ── ניהול משתמשים מאושרים (למנהלים בלבד) ────────────────────────────────────
+let allowedUsers = {}; // { phoneKey: {name, phone, active, isAdmin, addedAt} }
+let newUserName = "", newUserPhone = "", newUserIsAdmin = false;
 let movs = [];
 let tab = "map";
 let mAisle=null, mCube=null, mPos=null;
@@ -291,6 +301,12 @@ function startListeners(){
     movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts));
     render();
   }, err=>{ console.error('movements listener error', err); });
+  if(CURRENT_USER.isAdmin){
+    db.ref('allowedUsers').on('value', snap=>{
+      allowedUsers = snap.val() || {};
+      render();
+    }, err=>{ console.error('allowedUsers listener error', err); });
+  }
 }
 auth.onAuthStateChanged(user=>{ if(user) startListeners(); });
 auth.signInAnonymously().catch(err=>{
@@ -476,7 +492,8 @@ async function proceedSaveItem(){
     ts:new Date().toISOString(), pos:posId,
     type: prevItem ? 'edit' : 'in',
     sku: entry.sku, qty: entry.qty, unit: entry.unit,
-    prev: prevItem ? `${prevItem.sku} × ${prevItem.qty}` : null
+    prev: prevItem ? `${prevItem.sku} × ${prevItem.qty}` : null,
+    by: currentUserLabel()
   });
   notify('✓ '+posId+' עודכן — '+entry.sku);
   editingItem=null; fOriginalUpdatedAt=null; editConflictInfo=null;
@@ -509,7 +526,7 @@ async function removeItem(posId, itemId){
   const remaining = Object.keys(data[posId]?.items||{}).filter(k=>k!==itemId);
   if(remaining.length===0){ await db.ref(`positions/${fkey(posId)}`).remove(); }
   await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit
+    ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit, by: currentUserLabel()
   });
   notify('✓ '+item.sku+' הוצא מ-'+posId);
   render();
@@ -543,7 +560,7 @@ async function bulkRemoveSelected(){
     const remaining = Object.keys(data[posId]?.items||{}).filter(k=>k!==itemId);
     if(remaining.length===0){ await db.ref(`positions/${fkey(posId)}`).remove(); }
     await db.ref('movements/'+mkId()).set({
-      ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit
+      ts:new Date().toISOString(), pos:posId, type:'out', sku:item.sku, qty:item.qty, unit:item.unit, by: currentUserLabel()
     });
   }
   searchSelected = new Set();
@@ -603,7 +620,7 @@ async function confirmCartonAssign(){
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/cartonBarcode`).set(bc);
   await db.ref(`positions/${fkey(posId)}/items/${itemId}/updatedAt`).set(new Date().toISOString());
   await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:posId, type:'link', sku:item.sku, qty:item.qty, unit:item.unit, carton:bc
+    ts:new Date().toISOString(), pos:posId, type:'link', sku:item.sku, qty:item.qty, unit:item.unit, carton:bc, by: currentUserLabel()
   });
   notify(`✓ קרטון ${bc} שויך ל-${posId}`);
   assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null;
@@ -647,7 +664,7 @@ async function confirmChangeLocation(){
   if(remaining.length===0){ await db.ref(`positions/${fkey(oldPos)}`).remove(); }
   await db.ref('movements/'+mkId()).set({
     ts:new Date().toISOString(), pos:newPos, fromPos:oldPos, type:'move', sku:item.sku, qty:item.qty, unit:item.unit,
-    carton: item.cartonBarcode||null
+    carton: item.cartonBarcode||null, by: currentUserLabel()
   });
   notify(`✓ הועבר מ-${oldPos} ל-${newPos}`);
   changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
@@ -671,6 +688,35 @@ function doScan(){
 function openPos(posId){ scanPos=posId; editingItem=null; }
 function resetScan(){ scanPos=null; scanVal=''; scanErr=''; editingItem=null; render(); setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},80); }
 
+// ── ניהול משתמשים מאושרים (למנהלים בלבד) ────────────────────────────────────
+function safePhoneKeyClient(phone){ return String(phone||'').replace(/\D/g,''); }
+function setNewUserName(v){ newUserName=v; render(); }
+function setNewUserPhone(v){ newUserPhone=v; render(); }
+function toggleNewUserIsAdmin(v){ newUserIsAdmin=v; render(); }
+async function addAllowedUser(){
+  const name = newUserName.trim();
+  const phoneKey = safePhoneKeyClient(newUserPhone);
+  if(!name){ notify('חובה להזין שם','warn'); return; }
+  if(!phoneKey){ notify('חובה להזין מספר טלפון תקין','warn'); return; }
+  await db.ref(`allowedUsers/${phoneKey}`).set({
+    name, phone:newUserPhone.trim(), active:true, isAdmin:newUserIsAdmin, addedAt:new Date().toISOString()
+  });
+  notify(`✓ ${name} נוסף.ה למערכת`);
+  newUserName=""; newUserPhone=""; newUserIsAdmin=false;
+  render();
+}
+async function toggleUserActive(phoneKey){
+  const u = allowedUsers[phoneKey]; if(!u) return;
+  await db.ref(`allowedUsers/${phoneKey}/active`).set(!(u.active!==false));
+  notify(u.active!==false ? `✓ הגישה של ${u.name} נחסמה` : `✓ הגישה של ${u.name} שוחזרה`);
+}
+async function removeAllowedUser(phoneKey){
+  const u = allowedUsers[phoneKey]; if(!u) return;
+  if(!confirm(`להסיר לצמיתות את ${u.name} מרשימת המשתמשים המאושרים?`)) return;
+  await db.ref(`allowedUsers/${phoneKey}`).remove();
+  notify(`✓ ${u.name} הוסר.ה`);
+}
+
 // ── ייבוא נתונים ראשוניים (65 עמדות שהיו לפני עליית המערכת) ───────────────────
 async function importSeedData(){
   const keys = Object.keys(SEED_DATA);
@@ -681,7 +727,7 @@ async function importSeedData(){
     const src = SEED_DATA[posId];
     const entry = { sku:src.sku, name:src.name||'', qty:src.qty, unit:src.unit, note:src.note||'', cartonBarcode:null, updatedAt:src.updatedAt||new Date().toISOString() };
     await db.ref(`positions/${fkey(posId)}/items/${itemId}`).set(entry);
-    await db.ref('movements/'+mkId()).set({ ts:new Date().toISOString(), pos:posId, type:'in', sku:entry.sku, qty:entry.qty, unit:entry.unit });
+    await db.ref('movements/'+mkId()).set({ ts:new Date().toISOString(), pos:posId, type:'in', sku:entry.sku, qty:entry.qty, unit:entry.unit, by: currentUserLabel() });
     imported++;
   }
   notify(`✓ יובאו ${imported} עמדות${skipped?` · דולגו ${skipped} (כבר תפוסות)`:''}`);
@@ -1235,7 +1281,7 @@ function render(){
               ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
               ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
             </div>
-            <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}</div>
+            <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
           </div>
         </div>`).join('');
     }
@@ -1271,7 +1317,41 @@ function render(){
           ${AISLES.map(a=>`<button class="btn btn-blue btn-sm" onclick="printLabels('${a}')">מעבר ${a}</button>`).join('')}
           <button class="btn btn-p btn-sm" onclick="printLabels()">🖨 הכל (${ALL_POS.length.toLocaleString()})</button>
         </div>
-      </div>`;
+      </div>
+      ${CURRENT_USER.isAdmin ? `
+      <div class="settings-sec">
+        <div class="settings-ttl">👤 ניהול משתמשים מאושרים</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">רק מספרי טלפון ברשימה הזו יכולים להתחבר למערכת. לחסימת גישה — לא צריך למחוק, אפשר פשוט להשבית.</div>
+        <div class="frow">
+          <div class="fg">
+            <label class="flbl">שם</label>
+            <input class="finp rtl" placeholder="שם העובד.ת..." value="${esc(newUserName)}" oninput="setNewUserName(this.value)">
+          </div>
+          <div class="fg">
+            <label class="flbl">טלפון</label>
+            <input class="finp" placeholder="050-0000000" value="${esc(newUserPhone)}" oninput="setNewUserPhone(this.value)">
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--sub);cursor:pointer;margin-bottom:10px">
+          <input type="checkbox" ${newUserIsAdmin?'checked':''} onchange="toggleNewUserIsAdmin(this.checked)" style="width:16px;height:16px;cursor:pointer">
+          הרשאת מנהל.ת (יכול.ה גם לנהל משתמשים)
+        </label>
+        <button class="btn btn-p btn-w" onclick="addAllowedUser()" style="margin-bottom:12px">➕ הוסף.י משתמש.ת</button>
+        ${Object.entries(allowedUsers).length===0 ? `<div class="empty">אין עדיין משתמשים ברשימה</div>` :
+          Object.entries(allowedUsers).map(([phoneKey,u])=>`
+            <div class="sr" style="cursor:default;${u.active===false?'opacity:.5':''}">
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;font-weight:800">${esc(u.name)}${u.isAdmin?' <span class="chip">מנהל.ת</span>':''}</div>
+                <div style="font-size:11px;color:var(--sub);font-family:monospace">${esc(u.phone)}</div>
+                <div style="font-size:10px;margin-top:2px">${u.active===false?'<span style="color:var(--red)">חסום</span>':'<span style="color:var(--grn)">פעיל</span>'}</div>
+              </div>
+              <div style="display:flex;gap:5px;flex-shrink:0">
+                <button class="btn btn-g btn-sm" onclick="toggleUserActive('${phoneKey}')">${u.active===false?'שחזר':'חסום'}</button>
+                <button class="btn btn-d btn-sm" onclick="removeAllowedUser('${phoneKey}')">הסר</button>
+              </div>
+            </div>`).join('')
+        }
+      </div>` : ''}`;
   }
 
   root.innerHTML = `
@@ -1309,10 +1389,11 @@ function render(){
       </div>
     </div>` : ''}
     <div class="app" dir="rtl">
-      <div class="hdr">
+      <div class="hdr" style="flex-wrap:wrap">
         <div class="hdr-t">${hdrLabel()}</div>
         <button class="logout-btn" onclick="window.location.href='/api/logout'">🚪 יציאה</button>
         <div class="badge">ADDICT WH</div>
+        <div style="width:100%;font-size:10px;color:var(--sub);text-align:left">מחוברת כ: <b style="color:var(--acc)">${esc(currentUserLabel())}</b>${CURRENT_USER.isAdmin?' · מנהל.ת':''}</div>
       </div>
       <div class="content" id="content-scroll">${contentHtml}</div>
       ${(tab==='search' && searchSelected.size>0) ? `
@@ -1424,6 +1505,12 @@ window.askBulkRemove = ()=>{
     bulkRemoveSelected();
   }
 };
+window.setNewUserName = setNewUserName;
+window.setNewUserPhone = setNewUserPhone;
+window.toggleNewUserIsAdmin = toggleNewUserIsAdmin;
+window.addAllowedUser = addAllowedUser;
+window.toggleUserActive = toggleUserActive;
+window.removeAllowedUser = removeAllowedUser;
 window.importSeedData = ()=>{
   if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות תפוסות לא יידרסו.')){
     importSeedData();
