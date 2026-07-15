@@ -212,6 +212,8 @@ let scanVal="", scanPos=null, scanErr="";
 
 // editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
 let editingItem=null, fSKU="", fNameParts=[""], fQty="", fUnit="יחידות", fNote=""; // fNameParts: up to 3 product-name entries, joined with ", " on save
+let fOriginalUpdatedAt=null; // updatedAt captured when the edit form opened, to detect if someone else saved in the meantime
+let editConflictInfo=null;   // {posId, itemId, freshItem} — shown when a save conflict is detected
 let sq="";
 let searchSelected=new Set(); // composite "posId::itemId" keys selected for bulk removal on the search page
 
@@ -403,7 +405,7 @@ function exportEmptyReport(aisle){
 
 // ── פעולות פריטים ────────────────────────────────────────────────────────────
 function openAddItem(posId){
-  fSKU=""; fNameParts=[""]; fQty=""; fUnit="יחידות"; fNote="";
+  fSKU=""; fNameParts=[""]; fQty=""; fUnit="יחידות"; fNote=""; fOriginalUpdatedAt=null;
   editingItem = {posId, itemId:null};
   assigningCartonFor=null; changingLocationFor=null;
   render();
@@ -415,12 +417,13 @@ function openEditItem(posId, itemId){
   fNameParts = item?.name ? item.name.split(',').map(s=>s.trim()).filter(Boolean) : [];
   if(fNameParts.length===0) fNameParts=[""];
   fQty = item?.qty?String(item.qty):''; fUnit = item?.unit||'יחידות'; fNote = item?.note||'';
+  fOriginalUpdatedAt = item?.updatedAt || null; // remembered to detect if someone else edits before we save
   editingItem = {posId, itemId};
   assigningCartonFor=null; changingLocationFor=null;
   render();
   setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
 }
-function cancelEditItem(){ editingItem=null; render(); }
+function cancelEditItem(){ editingItem=null; fOriginalUpdatedAt=null; render(); }
 function setFNamePart(idx,val){ fNameParts[idx]=val; render(); }
 function addFNamePart(){
   if(fNameParts.length>=3) return;
@@ -439,8 +442,29 @@ async function doSaveItem(){
   if(!fSKU.trim()){ notify('חובה להזין SKU / דגם','warn'); return; }
   const qty = parseInt(fQty);
   if(isNaN(qty)||qty<=0){ notify('חובה להזין כמות תקינה','warn'); return; }
+
+  // Conflict check — only relevant when editing an item that already existed.
+  // We compare against the freshest server copy, not just our local cache, since
+  // the realtime listener might not have caught up yet.
+  if(itemId){
+    try{
+      const snap = await db.ref(`positions/${fkey(posId)}/items/${itemId}`).once('value');
+      const freshItem = snap.val();
+      if(freshItem && freshItem.updatedAt !== fOriginalUpdatedAt){
+        editConflictInfo = { posId, itemId, freshItem };
+        render();
+        return;
+      }
+    } catch(e){ console.error('conflict check failed', e); }
+  }
+  await proceedSaveItem();
+}
+
+async function proceedSaveItem(){
+  const {posId, itemId} = editingItem;
   const id = itemId || mkId();
   const prevItem = itemId ? data[posId]?.items?.[itemId] : null;
+  const qty = parseInt(fQty);
   const joinedName = fNameParts.map(s=>s.trim()).filter(Boolean).join(', ');
   const entry = {
     sku:fSKU.trim().toUpperCase(), name:joinedName, qty, unit:fUnit, note:fNote.trim(),
@@ -455,8 +479,28 @@ async function doSaveItem(){
     prev: prevItem ? `${prevItem.sku} × ${prevItem.qty}` : null
   });
   notify('✓ '+posId+' עודכן — '+entry.sku);
-  editingItem=null;
+  editingItem=null; fOriginalUpdatedAt=null; editConflictInfo=null;
   render();
+}
+
+function cancelEditConflict(){ editConflictInfo=null; render(); }
+function loadFreshVersionIntoForm(){
+  if(!editConflictInfo) return;
+  const {freshItem} = editConflictInfo;
+  fSKU = freshItem?.sku||'';
+  fNameParts = freshItem?.name ? freshItem.name.split(',').map(s=>s.trim()).filter(Boolean) : [];
+  if(fNameParts.length===0) fNameParts=[""];
+  fQty = freshItem?.qty?String(freshItem.qty):'';
+  fUnit = freshItem?.unit||'יחידות';
+  fNote = freshItem?.note||'';
+  fOriginalUpdatedAt = freshItem?.updatedAt || null;
+  editConflictInfo = null;
+  notify('הטופס עודכן לגרסה העדכנית — אפשר לערוך ולשמור שוב');
+  render();
+}
+async function forceOverwriteEditConflict(){
+  editConflictInfo = null;
+  await proceedSaveItem();
 }
 
 async function removeItem(posId, itemId){
@@ -1231,6 +1275,26 @@ function render(){
   }
 
   root.innerHTML = `
+    ${editConflictInfo ? `
+    <div class="overlay" style="align-items:center">
+      <div class="modal" style="text-align:center;border:2px solid var(--acc)">
+        <div style="font-size:36px;margin-bottom:8px">⚠️</div>
+        <div style="font-size:15px;font-weight:900;color:var(--acc);margin-bottom:10px">מישהו אחר כבר עדכן את זה</div>
+        <div style="font-size:13px;line-height:1.6;margin-bottom:16px">
+          בזמן שערכת, כבר נשמר שינוי אחר לפריט הזה.<br>הגרסה העדכנית ביותר בשרת:
+          <div style="background:var(--surf);border-radius:var(--rs);padding:9px;margin-top:8px;text-align-last:center">
+            <span style="font-family:monospace;font-weight:900;color:var(--acc)">${esc(editConflictInfo.freshItem?.sku||'')}</span>
+            ${editConflictInfo.freshItem?.name?` · ${esc(editConflictInfo.freshItem.name)}`:''}
+            · ${editConflictInfo.freshItem?.qty} ${esc(editConflictInfo.freshItem?.unit||'')}
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-p btn-w" onclick="loadFreshVersionIntoForm()">טען את הגרסה העדכנית לעריכה</button>
+          <button class="btn btn-d btn-w" onclick="forceOverwriteEditConflict()">שמור בכל זאת את השינוי שלי (דורס)</button>
+          <button class="btn btn-g btn-w" onclick="cancelEditConflict()">ביטול</button>
+        </div>
+      </div>
+    </div>` : ''}
     ${cartonConflictInfo ? `
     <div class="overlay" style="align-items:center">
       <div class="modal" style="text-align:center;border:2px solid var(--red)">
@@ -1321,7 +1385,7 @@ function navBtn(id,lbl,svgInner){
 
 function switchTab(id){
   if(id!==tab){
-    editingItem=null;
+    editingItem=null; fOriginalUpdatedAt=null; editConflictInfo=null;
     assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null; cartonConflictInfo=null;
     changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
     if(id==='map' && tab!=='map'){ mAisle=null; mCube=null; mPos=null; }
@@ -1340,6 +1404,9 @@ window.openAddItem = openAddItem;
 window.openEditItem = openEditItem;
 window.cancelEditItem = cancelEditItem;
 window.doSaveItem = doSaveItem;
+window.cancelEditConflict = cancelEditConflict;
+window.loadFreshVersionIntoForm = loadFreshVersionIntoForm;
+window.forceOverwriteEditConflict = forceOverwriteEditConflict;
 window.askRemoveItem = (posId,itemId)=>{
   const item = data[posId]?.items?.[itemId];
   if(item && confirm(`להסיר את ${item.sku} מהמיקום ${posId}?`)){ removeItem(posId,itemId); }
