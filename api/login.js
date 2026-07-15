@@ -22,27 +22,37 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || "unknown";
 }
 
+// מחזיר { ok, data } — ok=false גם על שגיאת רשת וגם על תשובה לא תקינה (למשל
+// "אין הרשאה"), כדי שלעולם לא נבלבל "אין נתונים" עם "לא הצלחנו לבדוק".
 async function fbGet(path) {
   try {
     const r = await fetch(`${DB_URL}/${path}.json`);
-    return await r.json();
+    if (!r.ok) return { ok: false, data: null };
+    const data = await r.json();
+    return { ok: true, data };
   } catch {
-    return null;
+    return { ok: false, data: null };
   }
 }
 async function fbPut(path, value) {
   try {
-    await fetch(`${DB_URL}/${path}.json`, {
+    const r = await fetch(`${DB_URL}/${path}.json`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(value),
     });
-  } catch {}
+    return r.ok;
+  } catch {
+    return false;
+  }
 }
 async function fbDelete(path) {
   try {
-    await fetch(`${DB_URL}/${path}.json`, { method: "DELETE" });
-  } catch {}
+    const r = await fetch(`${DB_URL}/${path}.json`, { method: "DELETE" });
+    return r.ok;
+  } catch {
+    return false;
+  }
 }
 
 module.exports = (req, res) => {
@@ -78,8 +88,10 @@ module.exports = (req, res) => {
     const ipKey = safeIpKey(ip);
     const now = Date.now();
 
-    // בדיקת נעילה קיימת
-    const record = await fbGet(`loginAttempts/${ipKey}`);
+    // בדיקת נעילה קיימת (אם אי אפשר לבדוק בגלל תקלת חיבור — לא חוסמים בגללה,
+    // זו רק בדיקת נוחות, לא הבדיקה הביטחונית הקריטית)
+    const attemptsCheck = await fbGet(`loginAttempts/${ipKey}`);
+    const record = attemptsCheck.ok ? attemptsCheck.data : null;
     if (record && record.lockedUntil && record.lockedUntil > now) {
       const hoursLeft = Math.ceil((record.lockedUntil - now) / (60 * 60 * 1000));
       res.status(429).json({ error: `יותר מדי ניסיונות כניסה כושלים. המערכת נעולה לעוד כ-${hoursLeft} שעות.` });
@@ -110,23 +122,45 @@ module.exports = (req, res) => {
       return;
     }
 
-    // ── בדיקת מספר טלפון מול רשימת המשתמשים המאושרים ────────────────────────
     const phoneKey = safePhoneKey(phone);
     if (!phoneKey) {
       await registerFailure("מספר טלפון לא תקין.");
       return;
     }
 
-    let userRecord = await fbGet(`allowedUsers/${phoneKey}`);
+    // ── בדיקת מספר טלפון מול רשימת המשתמשים המאושרים ────────────────────────
+    const userCheck = await fbGet(`allowedUsers/${phoneKey}`);
+    if (!userCheck.ok) {
+      // לא הצלחנו בכלל לבדוק (למשל: חוקי ה-Firebase עדיין לא כוללים גישה
+      // לנתיב הזה) — נכשלים בבטחה, בלי לתת גישה ובלי לספור ניסיון כושל,
+      // כדי שלא תיווצר נעילה שגויה בזמן שמסדרים את ההגדרות.
+      res.status(500).json({
+        error: "שגיאת חיבור למסד הנתונים בבדיקת הטלפון — ודאי שחוקי ה-Firebase כוללים את allowedUsers, ונסי שוב.",
+      });
+      return;
+    }
+
+    let userRecord = userCheck.data;
 
     if (!userRecord) {
       // אתחול חד-פעמי: אם עדיין אין אף משתמש מאושר ברשימה, הכניסה הראשונה
       // שמצליחה עם שם המשתמש/סיסמה הנכונים הופכת אוטומטית למנהלת הראשית.
-      const allUsers = await fbGet(`allowedUsers`);
-      const totalUsers = allUsers ? Object.keys(allUsers).length : 0;
+      const allCheck = await fbGet(`allowedUsers`);
+      if (!allCheck.ok) {
+        res.status(500).json({
+          error: "שגיאת חיבור למסד הנתונים — ודאי שחוקי ה-Firebase כוללים את allowedUsers, ונסי שוב.",
+        });
+        return;
+      }
+      const totalUsers = allCheck.data ? Object.keys(allCheck.data).length : 0;
       if (totalUsers === 0) {
-        userRecord = { name: "מנהל.ת ראשי.ת", phone, active: true, isAdmin: true, addedAt: now };
-        await fbPut(`allowedUsers/${phoneKey}`, userRecord);
+        const bootstrapRecord = { name: "מנהל.ת ראשי.ת", phone, active: true, isAdmin: true, addedAt: now };
+        const wrote = await fbPut(`allowedUsers/${phoneKey}`, bootstrapRecord);
+        if (!wrote) {
+          res.status(500).json({ error: "לא הצלחנו ליצור את חשבון המנהל הראשוני — נסי שוב בעוד רגע." });
+          return;
+        }
+        userRecord = bootstrapRecord;
       }
     }
 
