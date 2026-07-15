@@ -51,6 +51,10 @@ button:disabled{opacity:.5;cursor:not-allowed}
       <label>סיסמה</label>
       <input type="password" id="password" autocomplete="current-password" required>
     </div>
+    <div class="fg">
+      <label>מספר טלפון</label>
+      <input type="tel" id="phone" autocomplete="tel" placeholder="050-0000000" required>
+    </div>
     <button type="submit" id="submitBtn">כניסה</button>
   </form>
 </div>
@@ -68,12 +72,13 @@ form.addEventListener('submit', async (e) => {
 
   const username = document.getElementById('username').value.trim();
   const password = document.getElementById('password').value;
+  const phone = document.getElementById('phone').value.trim();
 
   try {
     const res = await fetch('/api/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, phone }),
     });
     const data = await res.json();
     if (res.ok && data.ok) {
