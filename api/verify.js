@@ -27,9 +27,22 @@ module.exports = (req, res) => {
   const sig = token.slice(lastDot + 1);
   const expected = crypto.createHmac("sha256", secret).update(value).digest("hex");
 
-  if (sig === expected) {
-    res.status(200).json({ ok: true });
-  } else {
+  if (sig !== expected) {
     res.status(401).json({ ok: false });
+    return;
   }
+
+  let payload = {};
+  try {
+    payload = JSON.parse(value);
+  } catch {
+    // תואם לאחור לפורמט הישן (לפני שהוספנו טלפון/שם) — עדיין תקין, רק בלי פרטים נוספים
+  }
+
+  res.status(200).json({
+    ok: true,
+    name: payload.name || "",
+    phone: payload.phone || "",
+    isAdmin: !!payload.isAdmin,
+  });
 };
