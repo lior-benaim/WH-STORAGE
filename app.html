@@ -164,16 +164,48 @@ const WALKWAY = [4,11];
 const WALKWAY_EXCEPTION_AISLE = "ZI"; // in this aisle, cubes 4 & 11 are NOT walkways — full 1-11 floors
 const p2 = n => String(n).padStart(2,"0");
 const cubeFloors = (c, aisle) => FLOORS.filter(f => !WALKWAY.includes(c) || aisle===WALKWAY_EXCEPTION_AISLE || f >= 5);
+const SIDES = ['F','B']; // כל עמדה (01/02/03) מתפצלת לפרונט (F) ובק (B)
 
 const ALL_POS = (() => {
   const out = [];
   AISLES.forEach(a => CUBES.forEach(c => cubeFloors(c,a).forEach(f =>
-    [1,2,3].forEach(p => out.push(`${a}${c}-${p2(f)}-${p2(p)}`))
+    [1,2,3].forEach(p => SIDES.forEach(s => out.push(`${a}${c}-${p2(f)}-${p2(p)}${s}`)))
   )));
   return out;
 })();
-const POS_BC     = Object.fromEntries(ALL_POS.map((pos,i) => [pos, "P"+String(i+1).padStart(5,"0")]));
-const POS_BC_REV = Object.fromEntries(ALL_POS.map((pos,i) => ["P"+String(i+1).padStart(5,"0"), pos]));
+// שני רצפי ברקוד עצמאיים: F00001... לפרונט, B00001... לבק (כל אחד ממוספר בנפרד)
+const POS_BC = {};
+const POS_BC_REV = {};
+(() => {
+  let fCounter = 0, bCounter = 0;
+  ALL_POS.forEach(pos => {
+    const side = pos.slice(-1);
+    let bc;
+    if(side === 'F'){ fCounter++; bc = "F"+String(fCounter).padStart(5,"0"); }
+    else { bCounter++; bc = "B"+String(bCounter).padStart(5,"0"); }
+    POS_BC[pos] = bc;
+    POS_BC_REV[bc] = pos;
+  });
+})();
+// תאימות לאחור: הברקודים הישנים (P00001 וכו', מלפני הפיצול לפרונט/בק) ממשיכים
+// להיות מזוהים בסריקה/הקלדה, ומפנים אוטומטית לצד הפרונט (F) המתאים באותה עמדה —
+// כדי שאפשר להמשיך לעבוד עם המדבקות הפיזיות הישנות עד שמדביקים מדבקות חדשות.
+(() => {
+  let legacyIndex = 0;
+  for(let i=0; i<ALL_POS.length; i+=2){
+    legacyIndex++;
+    const legacyCode = "P"+String(legacyIndex).padStart(5,"0");
+    POS_BC_REV[legacyCode] = ALL_POS[i]; // ALL_POS[i] הוא תמיד ה-F של הזוג (F נוצר לפני B בכל איטרציה)
+  }
+})();
+
+// זיהוי אם עמדה מסוימת (כמו ZA1-01-01F) היא הצד ההופכי (B) של עמדה נתונה (F) ולהיפך —
+// משמש לחסימה אוטומטית של הצד השני עבור קרטונים שתופסים את שני החצאים יחד.
+function otherSidePos(posId){
+  const side = posId.slice(-1);
+  const base = posId.slice(0,-1);
+  return base + (side==='F' ? 'B' : 'F');
+}
 
 // One-time seed data — 65 positions already placed on paper before the system went live.
 // Import via Settings → "ייבוא נתונים ראשוניים". Existing positions are never overwritten.
@@ -190,21 +222,37 @@ const mkId  = () => Date.now().toString(36)+Math.random().toString(36).slice(2,5
 // ── מחשבון מיקומים ────────────────────────────────────────────────────────────
 // Physical dimensions of a single shelf position (cm)
 const SHELF = { depth:80, width:195, height:50 };
+const HALF_DEPTH = SHELF.depth / 2; // 40 ס"מ — עומק חצי מדף (פרונט או בק בנפרד)
 // Carton types with fixed placement orientation:
 //   carton length  → across shelf width  (side by side)
 //   carton height  → across shelf depth  (front-to-back rows)
 //   carton width   → across shelf height (stacked layers)
+// אם קרטון עמוק מדי מכדי להיכנס אפילו פעם אחת לחצי-עומק (40 ס"מ) — הוא חייב
+// לתפוס את הפרונט והבק יחד כמיקום משולב אחד (forceCombined).
 const CARTON_TYPES = {
   "לבן קטן":  { h:35, w:42, l:61 },
   "לבן גדול": { h:41, w:50, l:64 },
   "חום קטן":  { h:40, w:35, l:52 },
-  "חום גדול": { h:40, w:39, l:59 }
+  "חום גדול": { h:40, w:39, l:59 },
+  "שק לבן":   { special:true, combinedCapacity:2, blockedSlots:['03'] }
 };
 Object.values(CARTON_TYPES).forEach(c=>{
-  c.perWidth  = Math.floor(SHELF.width  / c.l) || 0;
-  c.perDepth  = Math.floor(SHELF.depth  / c.h) || 0;
-  c.perHeight = Math.floor(SHELF.height / c.w) || 0;
-  c.capacity  = c.perWidth * c.perDepth * c.perHeight;
+  if(c.special){
+    // סוג מיוחד (לא קרטון סטנדרטי) — קיבולת וכללים מוגדרים ידנית, לא לפי נוסחה
+    c.forceCombined = true;
+    c.capacity = c.combinedCapacity;
+    c.perWidth = null; c.perDepthFull = null; c.perDepthHalf = null; c.perHeight = null;
+  } else {
+    c.perWidth     = Math.floor(SHELF.width  / c.l) || 0;
+    c.perHeight    = Math.floor(SHELF.height / c.w) || 0;
+    c.perDepthFull = Math.floor(SHELF.depth  / c.h) || 0;
+    c.perDepthHalf = Math.floor(HALF_DEPTH   / c.h) || 0;
+    c.forceCombined = c.perDepthHalf < 1;
+    c.capacity = c.forceCombined
+      ? (c.perWidth * c.perDepthFull * c.perHeight)   // מיקום משולב (פרונט+בק יחד), עומק מלא
+      : (c.perWidth * c.perDepthHalf * c.perHeight);  // כל חצי (פרונט או בק) בנפרד
+    c.blockedSlots = [];
+  }
 });
 let calcRows = [{type:"לבן קטן", qty:""}];
 
@@ -222,6 +270,7 @@ let scanVal="", scanPos=null, scanErr="";
 
 // editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
 let editingItem=null, fSKU="", fNameParts=[""], fQty="", fUnit="יחידות", fNote=""; // fNameParts: up to 3 product-name entries, joined with ", " on save
+let pendingCounted = {}; // { 'posId::itemId': true/false } — בחירה זמנית לפני "שמור לביטחון"
 let fOriginalUpdatedAt=null; // updatedAt captured when the edit form opened, to detect if someone else saved in the meantime
 let editConflictInfo=null;   // {posId, itemId, freshItem} — shown when a save conflict is detected
 let sq="";
@@ -277,18 +326,35 @@ function startListeners(){
     const raw = snap.val() || {};
     const migrated = {};
     Object.entries(raw).forEach(([posId, val])=>{
-      if(val && val.items){
-        migrated[posId] = val; // already in the new multi-item format
-      } else if(val && val.sku){
-        // Old single-item format — convert on the fly and persist the conversion
+      if(!val) return;
+      let itemsObj;
+      if(val.items){
+        itemsObj = val.items; // already in the new multi-item format
+      } else if(val.sku){
+        // Old single-item format — convert on the fly
         const itemId = mkId();
-        const converted = { items: { [itemId]: {
+        itemsObj = { [itemId]: {
           sku: val.sku, name: val.name||'', qty: val.qty, unit: val.unit,
           note: val.note||'', cartonBarcode: val.cartonBarcode||null,
           updatedAt: val.updatedAt || new Date().toISOString()
-        }}};
-        migrated[posId] = converted;
-        db.ref('positions/'+fkey(posId)).set(converted).catch(()=>{});
+        }};
+      } else {
+        return;
+      }
+
+      // מיקומים ישנים (מלפני הפיצול לפרונט/בק) לא מסתיימים ב-F או ב-B —
+      // מעבירים אותם אוטומטית ל"פרונט" (F) של אותה עמדה, כדי שהמלאי הקיים
+      // לא ילך לאיבוד עם המעבר למבנה החדש.
+      const needsSideMigration = !/[FB]$/.test(posId);
+      const finalPosId = needsSideMigration ? (posId + 'F') : posId;
+
+      migrated[finalPosId] = { items: itemsObj };
+
+      if(needsSideMigration || !val.items){
+        db.ref('positions/'+fkey(finalPosId)).set({ items: itemsObj }).catch(()=>{});
+        if(needsSideMigration){
+          db.ref('positions/'+fkey(posId)).remove().catch(()=>{});
+        }
       }
     });
     data = migrated;
@@ -298,7 +364,7 @@ function startListeners(){
   // so the app doesn't get slower and slower over months/years of daily use.
   db.ref('movements').orderByChild('ts').limitToLast(500).on('value', snap=>{
     const raw = snap.val() || {};
-    movs = Object.values(raw).sort((a,b)=> new Date(b.ts) - new Date(a.ts));
+    movs = Object.entries(raw).map(([k,v])=>({...v, _key:k})).sort((a,b)=> new Date(b.ts) - new Date(a.ts));
     render();
   }, err=>{ console.error('movements listener error', err); });
   if(CURRENT_USER.isAdmin){
@@ -440,6 +506,22 @@ function openEditItem(posId, itemId){
   setTimeout(()=>{ const el=document.getElementById('f-sku'); if(el) el.focus(); }, 60);
 }
 function cancelEditItem(){ editingItem=null; fOriginalUpdatedAt=null; render(); }
+function setPendingCounted(posId, itemId, value){
+  pendingCounted[posId+'::'+itemId] = value;
+  render();
+}
+async function saveCountedStatus(posId, itemId){
+  const key = posId+'::'+itemId;
+  if(!(key in pendingCounted)) return;
+  const value = pendingCounted[key];
+  await db.ref(`positions/${fkey(posId)}/items/${itemId}/counted`).set(value);
+  delete pendingCounted[key];
+  notify(value ? '✓ סומן כנספר' : '✗ סומן כלא נספר');
+  render();
+}
+async function dismissMoveAlert(movementKey){
+  await db.ref(`movements/${movementKey}/alertPending`).set(null);
+}
 function setFNamePart(idx,val){ fNameParts[idx]=val; render(); }
 function addFNamePart(){
   if(fNameParts.length>=3) return;
@@ -664,7 +746,8 @@ async function confirmChangeLocation(){
   if(remaining.length===0){ await db.ref(`positions/${fkey(oldPos)}`).remove(); }
   await db.ref('movements/'+mkId()).set({
     ts:new Date().toISOString(), pos:newPos, fromPos:oldPos, type:'move', sku:item.sku, qty:item.qty, unit:item.unit,
-    carton: item.cartonBarcode||null, by: currentUserLabel()
+    carton: item.cartonBarcode||null, by: currentUserLabel(),
+    alertPending: CURRENT_USER.phone==='121212' ? true : null
   });
   notify(`✓ הועבר מ-${oldPos} ל-${newPos}`);
   changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
@@ -767,7 +850,7 @@ function exportToExcel(searchOnly){
 
 function printLabels(aisle, cube, floor){
   let positions = ALL_POS;
-  if(floor!==undefined) positions = [`${aisle}${cube}-${p2(floor)}-01`,`${aisle}${cube}-${p2(floor)}-02`,`${aisle}${cube}-${p2(floor)}-03`];
+  if(floor!==undefined) positions = [`${aisle}${cube}-${p2(floor)}-01F`,`${aisle}${cube}-${p2(floor)}-01B`,`${aisle}${cube}-${p2(floor)}-02F`,`${aisle}${cube}-${p2(floor)}-02B`,`${aisle}${cube}-${p2(floor)}-03F`,`${aisle}${cube}-${p2(floor)}-03B`];
   else if(cube!==undefined) positions = ALL_POS.filter(p=>p.startsWith(`${aisle}${cube}-`));
   else if(aisle) positions = ALL_POS.filter(p=>p.startsWith(aisle));
   const w = window.open('','_blank');
@@ -786,14 +869,15 @@ function printLabels(aisle, cube, floor){
 function renderPosView(posId){
   const items = itemsOf(posId);
   const bc = POS_BC[posId];
-  const m = posId.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)$/);
-  const aisle=m?m[1]:'', cube=m?m[2]:'', floor=m?parseInt(m[3]):0, pos=m?parseInt(m[4]):0;
+  const m = posId.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)([FB])$/);
+  const aisle=m?m[1]:'', cube=m?m[2]:'', floor=m?parseInt(m[3]):0, pos=m?parseInt(m[4]):0, side=m?m[5]:'';
+  const sideLabel = side==='F' ? '🔵 פרונט' : side==='B' ? '🟣 בק' : '';
 
   let html = `<div class="pos-view">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
       <div>
         <div class="pos-view-id">${posId}</div>
-        <div class="pos-view-sub">מעבר ${aisle} · קובייה ${cube} · קומה ${floor} · עמדה ${pos}</div>
+        <div class="pos-view-sub">מעבר ${aisle} · קובייה ${cube} · קומה ${floor} · עמדה ${pos} · ${sideLabel}</div>
         ${bc?`<div style="font-family:monospace;font-size:12px;color:var(--acc);font-weight:800;margin-top:6px;letter-spacing:1px">🏷 ${bc}</div>`:''}
       </div>
       <button class="btn btn-blue btn-sm" onclick="printLabels('${aisle}','${cube}',${floor})">🖨 מדבקות קומה</button>
@@ -803,7 +887,11 @@ function renderPosView(posId){
   if(items.length===0){
     html += `<div class="pos-empty">עמדה ריקה</div>`;
   } else {
-    html += items.map(([itemId,item])=>`
+    html += items.map(([itemId,item])=>{
+      const posKey = posId+'::'+itemId;
+      const hasPending = pendingCounted.hasOwnProperty(posKey);
+      const displayVal = hasPending ? pendingCounted[posKey] : item.counted;
+      return `
       <div class="item-card">
         <div class="item-sku">${esc(item.sku)}</div>
         ${item.name?`<div class="item-name">${esc(item.name)}</div>`:''}
@@ -814,13 +902,20 @@ function renderPosView(posId){
         ${item.note?`<div class="item-note">${esc(item.note)}</div>`:''}
         ${item.cartonBarcode?`<div class="item-carton">📦 קרטון משויך: ${esc(item.cartonBarcode)}</div>`:''}
         <div class="item-date">עודכן: ${fmtD(item.updatedAt)}</div>
+        ${item.counted!==undefined && !hasPending ? `<div style="font-size:10px;font-weight:800;color:${item.counted?'var(--grn)':'var(--red)'};margin-top:5px">${item.counted?'✓ נספר':'✗ לא נספר'}</div>` : ''}
+        <div class="item-actions">
+          <button class="btn btn-sm ${displayVal===true?'btn-p':'btn-g'}" onclick="setPendingCounted('${posId}','${itemId}',true)">✓ ספור</button>
+          <button class="btn btn-sm ${displayVal===false?'btn-d':'btn-g'}" onclick="setPendingCounted('${posId}','${itemId}',false)">✗ לא ספור</button>
+          ${hasPending?`<button class="btn btn-p btn-sm" onclick="saveCountedStatus('${posId}','${itemId}')">💾 שמור לביטחון</button>`:''}
+        </div>
         <div class="item-actions">
           <button class="btn btn-p btn-sm" onclick="openEditItem('${posId}','${itemId}')">ערוך</button>
           <button class="btn btn-blue btn-sm" onclick="openCartonAssign('${posId}','${itemId}')">📦 שייך קרטון</button>
           <button class="btn btn-blue btn-sm" onclick="openChangeLocation('${posId}','${itemId}')">🔀 שנה מיקום</button>
           <button class="btn btn-d btn-sm" onclick="askRemoveItem('${posId}','${itemId}')">הסר</button>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 
   html += `</div>
@@ -911,7 +1006,7 @@ function renderPosView(posId){
       html += `<div class="fg">
         <label class="flbl">סרוק / הקלד מיקום יעד (ברקוד מדף או מיקום ישיר)</label>
         <div style="display:flex;gap:6px">
-          <input id="new-loc-input" class="finp" style="flex:1" placeholder="P00123 או ZA1-01-01..." value="${esc(newLocScanVal)}"
+          <input id="new-loc-input" class="finp" style="flex:1" placeholder="F00123 או ZA1-01-01F..." value="${esc(newLocScanVal)}"
             oninput="setNewLocScanVal(this.value)" onkeydown="if(event.key==='Enter')resolveChangeLocation()">
           <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanLocationCamera()">📷</button>
         </div>
@@ -1003,33 +1098,40 @@ function render(){
     contentHtml = `<div class="list">${rows}</div>`;
   }
   else if(tab==='map' && mAisle && mCube && !mPos){
+    const renderBox = (pid) => {
+      const items = itemsOf(pid);
+      const posNum = pid.slice(-3,-1);
+      let inner;
+      if(items.length===0){
+        inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
+      } else if(items.length===1){
+        const it = items[0][1];
+        const secondLine = it.cartonBarcode ? `📦 ${esc(it.cartonBarcode)}` : `${it.qty} ${esc(it.unit)}`;
+        inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div><div style="font-size:10px;color:var(--sub)">${secondLine}</div>`;
+      } else {
+        const first = items[0][1];
+        const secondLine = first.cartonBarcode ? `📦 ${esc(first.cartonBarcode)}` : `${first.qty} ${esc(first.unit)}`;
+        inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(first.sku)}</div><div style="font-size:9px;color:var(--sub)">${secondLine} · +${items.length-1} נוספים</div>`;
+      }
+      return `<div onclick="setPos('${pid}')"
+        style="flex:1;background:${items.length?'var(--ad)':'var(--surf)'};border:1px solid ${items.length?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
+        <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}</div>
+        ${inner}
+      </div>`;
+    };
     const rows = cubeFloors(mCube, mAisle).slice().reverse().map(f=>{
-      const positions = [`${mAisle}${mCube}-${p2(f)}-01`,`${mAisle}${mCube}-${p2(f)}-02`,`${mAisle}${mCube}-${p2(f)}-03`];
-      const used = positions.filter(isOccupied).length;
-      const boxes = positions.map(pid=>{
-        const items = itemsOf(pid);
-        const posNum = pid.slice(-2);
-        let inner;
-        if(items.length===0){
-          inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
-        } else if(items.length===1){
-          const it = items[0][1];
-          inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div><div style="font-size:10px;color:var(--sub)">${it.qty} ${esc(it.unit)}</div>`;
-        } else {
-          inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(items[0][1].sku)}</div><div style="font-size:10px;color:var(--sub)">+${items.length-1} נוספים</div>`;
-        }
-        return `<div onclick="setPos('${pid}')"
-          style="flex:1;background:${items.length?'var(--ad)':'var(--surf)'};border:1px solid ${items.length?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
-          <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}</div>
-          ${inner}
-        </div>`;
-      }).join('');
-      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:6px">
+      const positionsF = [`${mAisle}${mCube}-${p2(f)}-01F`,`${mAisle}${mCube}-${p2(f)}-02F`,`${mAisle}${mCube}-${p2(f)}-03F`];
+      const positionsB = [`${mAisle}${mCube}-${p2(f)}-01B`,`${mAisle}${mCube}-${p2(f)}-02B`,`${mAisle}${mCube}-${p2(f)}-03B`];
+      const used = [...positionsF,...positionsB].filter(isOccupied).length;
+      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:5px">
         <div style="display:flex;align-items:center;gap:8px">
           <div class="row-id">קומה ${p2(f)}</div>
-          <div class="row-meta">${used}/3 תפוסות</div>
+          <div class="row-meta">${used}/6 תפוסות</div>
         </div>
-        <div style="display:flex;gap:5px">${boxes}</div>
+        <div style="font-size:9px;color:var(--blue);font-weight:700">🔵 פרונט</div>
+        <div style="display:flex;gap:5px">${positionsF.map(renderBox).join('')}</div>
+        <div style="font-size:9px;color:#C77DFF;font-weight:700;margin-top:2px">🟣 בק</div>
+        <div style="display:flex;gap:5px">${positionsB.map(renderBox).join('')}</div>
       </div>`;
     }).join('');
     contentHtml = `<div class="list">${rows}</div>`;
@@ -1040,12 +1142,12 @@ function render(){
   else if(tab==='scan' && !scanPos){
     contentHtml = `<div class="fsec">
       <div class="sec-ttl">סרוק ברקוד עמדה</div>
-      <input id="scan-input" class="scan-inp" placeholder="ZA1-01-02 או P00001..." value="${esc(scanVal)}"
+      <input id="scan-input" class="scan-inp" placeholder="ZA1-01-02F או F00001..." value="${esc(scanVal)}"
         oninput="setScanVal(this.value);this.value=scanVal"
         onkeydown="if(event.key==='Enter')doScan()" autocomplete="off">
       <button class="btn btn-blue btn-w" style="margin-top:8px" onclick="scanShelfCamera()">📷 סרוק במצלמה</button>
       <div style="font-size:11px;color:var(--txt);text-align:center;margin-top:5px">
-        סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר את המיקום (כמו ZA1-01-02), קוד הברקוד (כמו P00001), או אפילו ברקוד קרטון (כמו C000001) — יקפוץ ישר למיקום שאליו הוא משויך
+        סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר את המיקום (כמו ZA1-01-02F), קוד הברקוד (כמו F00001 או B00001), או אפילו ברקוד קרטון (כמו C000001) — יקפוץ ישר למיקום שאליו הוא משויך
       </div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
       <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()">פתח עמדה</button>
@@ -1117,11 +1219,14 @@ function render(){
   }
   else if(tab==='calc'){
     contentHtml = `<div class="fsec" style="text-align:center">
-      <div class="sec-ttl">מידות עמדה בודדת</div>
+      <div class="sec-ttl">מידות עמדה בודדת (פרונט + בק יחד)</div>
       <svg viewBox="0 0 300 175" style="width:100%;max-width:260px;display:block;margin:6px auto">
         <polygon points="60,55 200,55 235,25 95,25" fill="rgba(240,196,25,.15)" stroke="#F0C419" stroke-width="1.5"/>
         <polygon points="200,55 235,25 235,95 200,125" fill="rgba(240,196,25,.08)" stroke="#F0C419" stroke-width="1.5"/>
         <rect x="60" y="55" width="140" height="70" fill="#1F1F1F" stroke="#F0C419" stroke-width="2"/>
+        <line x1="130" y1="55" x2="130" y2="125" stroke="#666" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="95" y="93" text-anchor="middle" fill="#60A5FA" font-size="11" font-weight="700">בק</text>
+        <text x="165" y="93" text-anchor="middle" fill="#C77DFF" font-size="11" font-weight="700">פרונט</text>
         <line x1="60" y1="136" x2="200" y2="136" stroke="#888" stroke-width="1"/>
         <line x1="60" y1="132" x2="60" y2="140" stroke="#888" stroke-width="1"/>
         <line x1="200" y1="132" x2="200" y2="140" stroke="#888" stroke-width="1"/>
@@ -1130,7 +1235,7 @@ function render(){
         <text x="42" y="94" text-anchor="middle" fill="#F0C419" font-size="15" font-weight="700">${SHELF.height}</text>
         <text x="42" y="107" text-anchor="middle" fill="#888" font-size="10">גובה</text>
         <text x="257" y="50" text-anchor="middle" fill="#F0C419" font-size="15" font-weight="700">${SHELF.depth}</text>
-        <text x="257" y="63" text-anchor="middle" fill="#888" font-size="10">עומק</text>
+        <text x="257" y="63" text-anchor="middle" fill="#888" font-size="10">עומק (${HALF_DEPTH} לכל צד)</text>
       </svg>
     </div>`;
 
@@ -1138,17 +1243,18 @@ function render(){
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px">` +
       Object.entries(CARTON_TYPES).map(([name,c])=>{
         const isWhite = name.includes('לבן');
+        const isSack = name.includes('שק');
         const boxFill = isWhite ? '#E8E4D8' : '#8B5E3C';
         const boxStroke = isWhite ? '#B8B4A8' : '#5C3B22';
+        const icon = isSack
+          ? `<path d="M13,9 Q13,3 20,3 Q27,3 27,9 L29,29 Q29,32 26,32 L14,32 Q11,32 11,29 Z" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5"/>`
+          : `<rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/><polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/><line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>`;
         return `<div style="background:var(--surf);border:1px solid var(--b);border-radius:9px;padding:11px;text-align:center">
-          <svg viewBox="0 0 40 34" style="width:40px;height:34px">
-            <rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/>
-            <polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/>
-            <line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>
-          </svg>
+          <svg viewBox="0 0 40 34" style="width:40px;height:34px">${icon}</svg>
           <div style="font-size:11.5px;font-weight:700;margin-top:5px">${name}</div>
           <div style="font-size:24px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:3px">${c.capacity}</div>
-          <div style="font-size:9.5px;color:var(--sub)">קרטונים לעמדה</div>
+          <div style="font-size:9.5px;color:var(--sub)">${c.forceCombined?'לעמדה משולבת (פרונט+בק)':'לכל צד בנפרד'}</div>
+          ${c.blockedSlots && c.blockedSlots.length ? `<div style="font-size:9px;color:var(--red);margin-top:3px">⛔ חסום בעמדה 03</div>` : ''}
         </div>`;
       }).join('') +
       `</div>`;
@@ -1160,8 +1266,17 @@ function render(){
       const qty = parseInt(row.qty)||0;
       const posNeeded = qty>0 ? Math.ceil(qty/c.capacity) : 0;
       const isWhite = row.type.includes('לבן');
+      const isSack = row.type.includes('שק');
       const boxFill = isWhite ? '#E8E4D8' : '#8B5E3C';
       const boxStroke = isWhite ? '#B8B4A8' : '#5C3B22';
+      const icon = isSack
+        ? `<path d="M13,9 Q13,3 20,3 Q27,3 27,9 L29,29 Q29,32 26,32 L14,32 Q11,32 11,29 Z" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5"/>`
+        : `<rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/><polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/><line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>`;
+      const capDetail = c.special
+        ? `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> ליחידת פרונט+בק משולבת. עמדה 03 חסומה לסוג הזה בכל המחסן.`
+        : c.forceCombined
+          ? `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> לעמדה משולבת פרונט+בק (${c.perWidth} לרוחב × ${c.perDepthFull} לעומק מלא × ${c.perHeight} לגובה) — הקרטון עמוק מדי בשביל חצי עמדה בלבד`
+          : `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> לכל צד בנפרד — פרונט או בק (${c.perWidth} לרוחב × ${c.perDepthHalf} לעומק חצי × ${c.perHeight} לגובה)`;
       contentHtml += `<div class="fsec">
         <div class="frow">
           <div class="fg">
@@ -1171,21 +1286,17 @@ function render(){
             </select>
           </div>
           <div class="fg">
-            <label class="flbl">כמות קרטונים</label>
+            <label class="flbl">כמות</label>
             <input id="calc-qty-${idx}" class="finp" type="text" inputmode="numeric" placeholder="0"
               value="${esc(row.qty)}" oninput="setCalcRowQty(${idx},this.value)" style="font-size:16px">
           </div>
         </div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">קיבולת לעמדה: <b style="color:var(--acc)">${c.capacity}</b> קרטונים (${c.perWidth} לרוחב × ${c.perDepth} לעומק × ${c.perHeight} לגובה)</div>
+        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">${capDetail}</div>
         ${qty>0?`<div style="background:var(--surf);border-radius:var(--rs);padding:14px 10px;text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:14px">
-          <svg viewBox="0 0 40 34" style="width:34px;height:29px;flex-shrink:0">
-            <rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/>
-            <polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/>
-            <line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>
-          </svg>
+          <svg viewBox="0 0 40 34" style="width:34px;height:29px;flex-shrink:0">${icon}</svg>
           <div>
             <div style="font-size:30px;font-weight:900;color:var(--acc);line-height:1">${posNeeded}</div>
-            <div style="font-size:11px;color:var(--sub)">מיקומים נדרשים</div>
+            <div style="font-size:11px;color:var(--sub)">${c.forceCombined?'עמדות משולבות (פרונט+בק) נדרשות':'צדדים (פרונט/בק) נדרשים'}</div>
           </div>
         </div>`:''}
         ${calcRows.length>1?`<button class="btn btn-d btn-sm btn-w" onclick="removeCalcRow(${idx})">הסר שורה</button>`:''}
@@ -1204,7 +1315,7 @@ function render(){
         <div class="sec-ttl">סה"כ כללי</div>
         <div style="font-size:40px;line-height:1">📍</div>
         <div style="font-size:40px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:2px">${totalPos}</div>
-        <div style="font-size:12px;color:var(--sub)">מיקומים נדרשים סה"כ (${totalQty} קרטונים)</div>
+        <div style="font-size:12px;color:var(--sub)">סה"כ נדרשים (${totalQty} יחידות) — שימו לב: זה מערבב יחד ספירת "צדדים" וספירת "עמדות משולבות", בדקו כל שורה בנפרד לפירוט מדויק</div>
       </div>`;
     }
   }
@@ -1250,7 +1361,7 @@ function render(){
         contentHtml += `<div class="empty">כל העמדות במעבר זה תפוסות</div>`;
       } else {
         contentHtml += cubesList.map(({c,total,free})=>{
-          const posLabels = free.map(p=>`<span class="chip" style="cursor:pointer" onclick="goToPosition('${p}')">${p.slice(-5)}</span>`).join(' ');
+          const posLabels = free.map(p=>`<span class="chip" style="cursor:pointer" onclick="goToPosition('${p}')">${p.slice(-6)}</span>`).join(' ');
           return `<div class="fsec">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
               <div class="row-id">קובייה ${c}</div>
@@ -1270,7 +1381,23 @@ function render(){
       const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
       const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
       contentHtml = `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${movs.length} תנועות</div>` +
-        movs.map(m=>`<div class="mov">
+        movs.map(m=>{
+          if(m.type==='move' && m.alertPending){
+            // התראה בולטת ואדומה (בסגנון וואטסאפ) — רק לשינויי מיקום שביצע עובד מחסן (121212).
+            // נעלמת (הופכת לשורה רגילה) ברגע שלוחצים עליה.
+            return `<div onclick="dismissMoveAlert('${m._key}')" style="cursor:pointer;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:11px 14px;margin-bottom:9px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:24px;height:24px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#fff">🔀</div>
+                <div style="font-size:12px;font-weight:900;color:var(--red)">📍 מיקום שונה ומתעדכן במערכת</div>
+              </div>
+              <div style="font-family:monospace;font-size:13px;font-weight:800;color:var(--acc);margin-top:7px">
+                ${esc(m.fromPos)} &#8592; ${esc(m.pos)}
+              </div>
+              <div style="font-size:11px;color:var(--sub);margin-top:2px">${esc(m.sku)} · ${m.qty} ${esc(m.unit)}${m.carton?` · קרטון ${esc(m.carton)}`:''}</div>
+              <div style="font-size:10px;color:var(--mut);margin-top:3px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''} · לחצו לסימון כנצפה</div>
+            </div>`;
+          }
+          return `<div class="mov">
           <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
           <div style="flex:1">
             <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
@@ -1283,7 +1410,8 @@ function render(){
             </div>
             <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
           </div>
-        </div>`).join('');
+        </div>`;
+        }).join('');
     }
   }
   else if(tab==='settings'){
@@ -1294,7 +1422,7 @@ function render(){
         <div class="info-row"><span>קוביות לכל מעבר</span><span class="info-val">16</span></div>
         <div class="info-row"><span>קומות (רגיל)</span><span class="info-val">1–11</span></div>
         <div class="info-row"><span>קומות (קוביות 4 ו-11)</span><span class="info-val">5–11 (למעט ZI: 1–11)</span></div>
-        <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3</span></div>
+        <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3 (× פרונט/בק = 6)</span></div>
         <div class="info-row"><span>סה"כ עמדות</span><span class="info-val">${ALL_POS.length.toLocaleString()}</span></div>
       </div>
       <div class="settings-sec">
@@ -1484,6 +1612,9 @@ function switchTab(id){
 window.openAddItem = openAddItem;
 window.openEditItem = openEditItem;
 window.cancelEditItem = cancelEditItem;
+window.setPendingCounted = setPendingCounted;
+window.saveCountedStatus = saveCountedStatus;
+window.dismissMoveAlert = dismissMoveAlert;
 window.doSaveItem = doSaveItem;
 window.cancelEditConflict = cancelEditConflict;
 window.loadFreshVersionIntoForm = loadFreshVersionIntoForm;
