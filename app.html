@@ -817,15 +817,18 @@ function previewCartonParityFixZI(){
   Object.keys(data).forEach(posId=>{
     if(!posId.startsWith('ZI')) return;
     Object.entries(data[posId].items||{}).forEach(([itemId,item])=>{
-      const cb = item.cartonBarcode;
-      const m = cb && cb.match(/^C(\d+)$/);
-      if(!m){ skipped++; return; }
-      const lastDigit = parseInt(cb.slice(-1));
+      // מספר הקרטון עשוי להיות בשדה cartonBarcode (אם שויך כראוי דרך "שייך קרטון"),
+      // או בשדה ה-SKU (במעבר ZI ידוע שמספר הקרטון הוזן בטעות לשם במקום)
+      let cartonNum = null;
+      if(item.cartonBarcode && /^C\d+$/i.test(item.cartonBarcode)) cartonNum = item.cartonBarcode.toUpperCase();
+      else if(item.sku && /^C\d+$/i.test(item.sku)) cartonNum = item.sku.toUpperCase();
+      if(!cartonNum){ skipped++; return; }
+      const lastDigit = parseInt(cartonNum.slice(-1));
       const correctSide = (lastDigit % 2 === 0) ? 'F' : 'B';
       const currentSide = posId.slice(-1);
       if(currentSide !== correctSide){
         const targetPos = posId.slice(0,-1) + correctSide;
-        moves.push({posId, itemId, sku:item.sku, cartonBarcode:cb, fromPos:posId, toPos:targetPos, item});
+        moves.push({posId, itemId, sku:item.sku, cartonBarcode:cartonNum, fromPos:posId, toPos:targetPos, item});
       }
     });
   });
@@ -1554,7 +1557,7 @@ function render(){
       <div class="settings-sec">
         <div class="settings-ttl">🔄 תיקון FRONT/BACK לפי מספר קרטון — מעבר ZI</div>
         <div style="font-size:11px;color:var(--sub);margin-bottom:9px">
-          עובר על כל הפריטים במעבר ZI: ברקוד קרטון שמסתיים בספרה זוגית → מיקומו FRONT. מסתיים בספרה אי-זוגית → BACK.
+          עובר על כל הפריטים במעבר ZI (בודק גם שדה SKU וגם ברקוד קרטון משויך): מספר שמסתיים בספרה זוגית → מיקומו FRONT. מסתיים בספרה אי-זוגית → BACK.
           פריטים שמועברים ללא ברקוד קרטון תקין (מתחיל ב-C) לא ייגעו.
         </div>
         <button class="btn btn-p btn-w" onclick="previewCartonParityFixZI()">🔍 בדוק מה ישתנה</button>
