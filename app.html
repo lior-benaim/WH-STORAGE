@@ -1280,7 +1280,7 @@ function render(){
             <svg viewBox="0 0 40 34" style="width:40px;height:34px">${icon}</svg>
             <div style="font-size:11.5px;font-weight:700;margin-top:5px">${name}</div>
             <div style="font-size:24px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:3px">${c.capacity}</div>
-            <div style="font-size:9.5px;color:var(--sub)">${c.forceCombined?'ליחידת FRONT+BACK':'לכל צד בנפרד'}</div>
+            <div style="font-size:9.5px;color:var(--sub)">${c.forceCombined?'למיקום FRONT+BACK יחד':'לכל מיקום בנפרד'}</div>
             ${c.blockedSlots && c.blockedSlots.length ? `<div style="font-size:9px;color:var(--red);margin-top:3px">⛔ חסום בעמדה 03</div>` : ''}
           </div>
           ${isSelected?`
@@ -1288,8 +1288,8 @@ function render(){
               <input id="calc-qty-${name}" class="finp" type="text" inputmode="numeric" placeholder="כמות..." value="${esc(calcQty[name]||'')}"
                 oninput="setCalcQty('${name}',this.value)" style="text-align:center;font-size:15px">
               ${qty>0?`<div style="margin-top:8px">
-                <div style="font-size:26px;font-weight:900;color:var(--acc);line-height:1">${posNeeded}</div>
-                <div style="font-size:9px;color:var(--sub)">${c.forceCombined?'עמדות משולבות':'צדדים'} נדרשים</div>
+                <div style="font-size:26px;font-weight:900;color:var(--acc);line-height:1">${c.forceCombined ? posNeeded*2 : posNeeded}</div>
+                <div style="font-size:9px;color:var(--sub)">מיקומים נדרשים${c.forceCombined?` (${posNeeded} זוגות FRONT+BACK)`:''}</div>
               </div>`:''}
             </div>
           `:''}
@@ -1299,16 +1299,19 @@ function render(){
 
     const selectedList = Object.keys(calcQty).filter(name=>calcSelected.has(name) && (parseInt(calcQty[name])||0)>0);
     const totalQty = selectedList.reduce((s,name)=>s+(parseInt(calcQty[name])||0),0);
-    const totalPos = selectedList.reduce((s,name)=>{
+    // סה"כ במונחי מיקומים ממשיים (F/B נפרדים) — קרטונים משולבים תופסים 2 מיקומים ליחידה
+    const totalLocations = selectedList.reduce((s,name)=>{
+      const c = CARTON_TYPES[name];
       const q=parseInt(calcQty[name])||0;
-      return s + Math.ceil(q/CARTON_TYPES[name].capacity);
+      const units = Math.ceil(q/c.capacity);
+      return s + (c.forceCombined ? units*2 : units);
     },0);
     if(totalQty>0){
       contentHtml += `<div class="fsec" style="text-align:center">
         <div class="sec-ttl">סה"כ כללי</div>
         <div style="font-size:40px;line-height:1">📍</div>
-        <div style="font-size:40px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:2px">${totalPos}</div>
-        <div style="font-size:12px;color:var(--sub)">סה"כ נדרשים (${totalQty} יחידות) — שימו לב: זה מערבב יחד ספירת "צדדים" וספירת "עמדות משולבות", בדקו כל כרטיס בנפרד לפירוט מדויק</div>
+        <div style="font-size:40px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:2px">${totalLocations}</div>
+        <div style="font-size:12px;color:var(--sub)">מיקומים נדרשים בסה"כ (${totalQty} יחידות)</div>
       </div>`;
     }
   }
