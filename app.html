@@ -264,8 +264,6 @@ let data = {};
 // ── ניהול משתמשים מאושרים (למנהלים בלבד) ────────────────────────────────────
 let allowedUsers = {}; // { phoneKey: {name, phone, active, isAdmin, addedAt} }
 let newUserName = "", newUserPhone = "", newUserIsAdmin = false;
-let cartonParityPreview = null; // {moves:[{posId,itemId,sku,cartonBarcode,fromPos,toPos,item}], skipped}
-let lastZIParityFix = null; // {appliedAt, appliedBy, moves:[...]} — לאפשר "בטל תיקון אחרון"
 let movs = [];
 let tab = "map";
 let previousTab = null; // לכפתור "חזרה לעמוד הקודם" הכללי
@@ -376,10 +374,6 @@ function startListeners(){
       allowedUsers = snap.val() || {};
       render();
     }, err=>{ console.error('allowedUsers listener error', err); });
-    db.ref('lastZIParityFix').on('value', snap=>{
-      lastZIParityFix = snap.val() || null;
-      render();
-    }, err=>{ console.error('lastZIParityFix listener error', err); });
   }
 }
 auth.onAuthStateChanged(user=>{ if(user) startListeners(); });
@@ -808,78 +802,6 @@ async function removeAllowedUser(phoneKey){
   if(!confirm(`להסיר לצמיתות את ${u.name} מרשימת המשתמשים המאושרים?`)) return;
   await db.ref(`allowedUsers/${phoneKey}`).remove();
   notify(`✓ ${u.name} הוסר.ה`);
-}
-
-// ── תיקון FRONT/BACK לפי מספר קרטון — מעבר ZI (כלי מנהל חד-פעמי) ────────────
-function previewCartonParityFixZI(){
-  const moves = [];
-  let skipped = 0;
-  Object.keys(data).forEach(posId=>{
-    if(!posId.startsWith('ZI')) return;
-    Object.entries(data[posId].items||{}).forEach(([itemId,item])=>{
-      // מספר הקרטון עשוי להיות בשדה cartonBarcode (אם שויך כראוי דרך "שייך קרטון"),
-      // או בשדה ה-SKU (במעבר ZI ידוע שמספר הקרטון הוזן בטעות לשם במקום)
-      let cartonNum = null;
-      if(item.cartonBarcode && /^C\d+$/i.test(item.cartonBarcode)) cartonNum = item.cartonBarcode.toUpperCase();
-      else if(item.sku && /^C\d+$/i.test(item.sku)) cartonNum = item.sku.toUpperCase();
-      if(!cartonNum){ skipped++; return; }
-      const lastDigit = parseInt(cartonNum.slice(-1));
-      const correctSide = (lastDigit % 2 === 0) ? 'F' : 'B';
-      const currentSide = posId.slice(-1);
-      if(currentSide !== correctSide){
-        const targetPos = posId.slice(0,-1) + correctSide;
-        moves.push({posId, itemId, sku:item.sku, cartonBarcode:cartonNum, fromPos:posId, toPos:targetPos, item});
-      }
-    });
-  });
-  cartonParityPreview = {moves, skipped};
-  render();
-}
-function cancelCartonParityFix(){ cartonParityPreview=null; render(); }
-async function applyCartonParityFixZI(){
-  if(!cartonParityPreview) return;
-  const {moves} = cartonParityPreview;
-  for(const mv of moves){
-    const {fromPos, toPos, itemId, item} = mv;
-    await db.ref(`positions/${fkey(toPos)}/items/${itemId}`).set({...item, updatedAt:new Date().toISOString()});
-    await db.ref(`positions/${fkey(fromPos)}/items/${itemId}`).remove();
-    const remaining = Object.keys(data[fromPos]?.items||{}).filter(k=>k!==itemId);
-    if(remaining.length===0){ await db.ref(`positions/${fkey(fromPos)}`).remove(); }
-  }
-  // שומרים בדיוק אילו הזזות בוצעו, כדי לאפשר "בטל" מדויק אם צריך
-  await db.ref('lastZIParityFix').set({
-    appliedAt: new Date().toISOString(),
-    appliedBy: currentUserLabel(),
-    moves: moves.map(mv=>({fromPos:mv.fromPos, toPos:mv.toPos, itemId:mv.itemId, sku:mv.sku}))
-  });
-  await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:'ZI (הכל)', type:'move',
-    sku:'תיקון גורף FRONT/BACK לפי מספר קרטון', qty:moves.length, unit:'פריטים', by:currentUserLabel()
-  });
-  notify(`✓ הועברו ${moves.length} פריטים לצד הנכון`);
-  cartonParityPreview = null;
-  render();
-}
-async function undoLastZIParityFix(){
-  const rec = lastZIParityFix;
-  if(!rec || !rec.moves || rec.moves.length===0){ notify('אין תיקון אחרון לבטל','warn'); return; }
-  if(!confirm(`לבטל את התיקון מ-${fmtDT(rec.appliedAt)} (${rec.moves.length} פריטים) ולהחזיר הכל למקום הקודם?`)) return;
-  for(const mv of rec.moves){
-    const {fromPos, toPos, itemId} = mv;
-    const item = data[toPos]?.items?.[itemId];
-    if(!item) continue; // אולי כבר הוזז/נערך שוב מאז — מדלגים כדי לא לדרוס משהו אחר
-    await db.ref(`positions/${fkey(fromPos)}/items/${itemId}`).set({...item, updatedAt:new Date().toISOString()});
-    await db.ref(`positions/${fkey(toPos)}/items/${itemId}`).remove();
-    const remaining = Object.keys(data[toPos]?.items||{}).filter(k=>k!==itemId);
-    if(remaining.length===0){ await db.ref(`positions/${fkey(toPos)}`).remove(); }
-  }
-  await db.ref('lastZIParityFix').remove();
-  await db.ref('movements/'+mkId()).set({
-    ts:new Date().toISOString(), pos:'ZI (הכל)', type:'move',
-    sku:'ביטול תיקון FRONT/BACK', qty:rec.moves.length, unit:'פריטים', by:currentUserLabel()
-  });
-  notify(`✓ בוטל — ${rec.moves.length} פריטים הוחזרו למקומם הקודם`);
-  render();
 }
 
 // ── ייבוא נתונים ראשוניים (65 עמדות שהיו לפני עליית המערכת) ───────────────────
@@ -1553,43 +1475,6 @@ function render(){
               </div>
             </div>`).join('')
         }
-      </div>
-      <div class="settings-sec">
-        <div class="settings-ttl">🔄 תיקון FRONT/BACK לפי מספר קרטון — מעבר ZI</div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:9px">
-          עובר על כל הפריטים במעבר ZI (בודק גם שדה SKU וגם ברקוד קרטון משויך): מספר שמסתיים בספרה זוגית → מיקומו FRONT. מסתיים בספרה אי-זוגית → BACK.
-          פריטים שמועברים ללא ברקוד קרטון תקין (מתחיל ב-C) לא ייגעו.
-        </div>
-        <button class="btn btn-p btn-w" onclick="previewCartonParityFixZI()">🔍 בדוק מה ישתנה</button>
-        ${lastZIParityFix && lastZIParityFix.moves && lastZIParityFix.moves.length>0 ? `
-          <div style="background:rgba(240,196,25,.08);border:1px solid rgba(240,196,25,.3);border-radius:var(--rs);padding:10px 12px;margin-top:10px">
-            <div style="font-size:11px;color:var(--acc)">תיקון אחרון: ${fmtDT(lastZIParityFix.appliedAt)} · ${lastZIParityFix.moves.length} פריטים · ע"י ${esc(lastZIParityFix.appliedBy||'')}</div>
-            <button class="btn btn-d btn-sm btn-w" style="margin-top:7px" onclick="undoLastZIParityFix()">↩️ בטל תיקון אחרון</button>
-          </div>
-        ` : ''}
-        ${cartonParityPreview ? `
-          <div style="margin-top:12px">
-            ${cartonParityPreview.moves.length===0
-              ? `<div class="empty">הכל כבר במקום הנכון — אין מה לתקן</div>`
-              : `<div style="font-size:12px;color:var(--sub);margin-bottom:8px">
-                  נמצאו <b style="color:var(--acc)">${cartonParityPreview.moves.length}</b> פריטים להעברה
-                  ${cartonParityPreview.skipped>0?` · ${cartonParityPreview.skipped} פריטים ללא ברקוד קרטון תקין (לא ייגעו)`:''}
-                </div>` +
-                cartonParityPreview.moves.slice(0,10).map(mv=>`
-                  <div class="sr" style="cursor:default">
-                    <div style="flex:1">
-                      <div style="font-size:11px;font-family:monospace"><b style="color:var(--acc)">${esc(mv.sku)}</b> · 📦 ${esc(mv.cartonBarcode)}</div>
-                      <div style="font-size:11px;color:var(--sub);margin-top:2px">${mv.fromPos} &#8594; <b style="color:var(--acc)">${mv.toPos}</b></div>
-                    </div>
-                  </div>`).join('') +
-                (cartonParityPreview.moves.length>10 ? `<div style="font-size:11px;color:var(--mut);text-align:center;margin-top:6px">ועוד ${cartonParityPreview.moves.length-10} פריטים...</div>` : '') +
-                `<div style="display:flex;gap:7px;margin-top:12px">
-                  <button class="btn btn-g" style="flex:1" onclick="cancelCartonParityFix()">ביטול</button>
-                  <button class="btn btn-p" style="flex:1" onclick="applyCartonParityFixZI()">✓ אשר/י והחלף/י</button>
-                </div>`
-            }
-          </div>
-        ` : ''}
       </div>` : ''}`;
   }
 
@@ -1757,10 +1642,6 @@ window.toggleNewUserIsAdmin = toggleNewUserIsAdmin;
 window.addAllowedUser = addAllowedUser;
 window.toggleUserActive = toggleUserActive;
 window.removeAllowedUser = removeAllowedUser;
-window.previewCartonParityFixZI = previewCartonParityFixZI;
-window.cancelCartonParityFix = cancelCartonParityFix;
-window.applyCartonParityFixZI = applyCartonParityFixZI;
-window.undoLastZIParityFix = undoLastZIParityFix;
 window.importSeedData = ()=>{
   if(confirm('לייבא 65 עמדות שכבר מולאו מראש? עמדות תפוסות לא יידרסו.')){
     importSeedData();
