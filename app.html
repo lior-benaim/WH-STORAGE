@@ -1113,14 +1113,14 @@ function render(){
       let inner;
       if(items.length===0){
         inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
-      } else if(items.length===1){
-        const it = items[0][1];
-        const secondLine = it.cartonBarcode ? `📦 ${esc(it.cartonBarcode)}` : `${it.qty} ${esc(it.unit)}`;
-        inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div><div style="font-size:10px;color:var(--sub)">${secondLine}</div>`;
       } else {
-        const first = items[0][1];
-        const secondLine = first.cartonBarcode ? `📦 ${esc(first.cartonBarcode)}` : `${first.qty} ${esc(first.unit)}`;
-        inner = `<div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(first.sku)}</div><div style="font-size:9px;color:var(--sub)">${secondLine} · +${items.length-1} נוספים</div>`;
+        const it = items[0][1];
+        const cartonLine = it.cartonBarcode ? `📦 ${esc(it.cartonBarcode)}` : `<span style="color:var(--mut)">— טרם שויך קרטון</span>`;
+        const extra = items.length>1 ? ` · +${items.length-1} נוספים` : '';
+        inner = `
+          <div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div>
+          ${it.name?`<div style="font-size:9.5px;color:var(--txt);margin-top:1px">${esc(it.name)}</div>`:''}
+          <div style="font-size:9.5px;color:var(--sub);margin-top:1px">${cartonLine}${extra}</div>`;
       }
       return `<div onclick="setPos('${pid}')"
         style="flex:1;background:${items.length?'var(--ad)':'var(--surf)'};border:1px solid ${items.length?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
