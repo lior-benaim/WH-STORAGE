@@ -254,7 +254,8 @@ Object.values(CARTON_TYPES).forEach(c=>{
     c.blockedSlots = [];
   }
 });
-let calcRows = [{type:"לבן קטן", qty:""}];
+let calcSelected = new Set(); // שמות סוגי הקרטון שנבחרו (כרטיסים פתוחים)
+let calcQty = {}; // כמות לכל סוג קרטון נבחר, לפי שם
 
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
 let emptyReportAisle = null; // null = show aisle summary list; else drill into that aisle
@@ -265,6 +266,7 @@ let allowedUsers = {}; // { phoneKey: {name, phone, active, isAdmin, addedAt} }
 let newUserName = "", newUserPhone = "", newUserIsAdmin = false;
 let movs = [];
 let tab = "map";
+let previousTab = null; // לכפתור "חזרה לעמוד הקודם" הכללי
 let mAisle=null, mCube=null, mPos=null;
 let scanVal="", scanPos=null, scanErr="";
 
@@ -459,14 +461,16 @@ function goToPosition(posId){
   mPos=posId; editingItem=null; tab='map'; render();
 }
 
-function addCalcRow(){ calcRows.push({type:"לבן קטן", qty:""}); render(); }
-function removeCalcRow(idx){
-  calcRows.splice(idx,1);
-  if(calcRows.length===0) calcRows.push({type:"לבן קטן", qty:""});
+function toggleCalcType(name){
+  if(calcSelected.has(name)){ calcSelected.delete(name); delete calcQty[name]; }
+  else { calcSelected.add(name); }
+  render();
+  if(calcSelected.has(name)) setTimeout(()=>{ const el=document.getElementById('calc-qty-'+name); if(el) el.focus(); }, 60);
+}
+function setCalcQty(name, val){
+  calcQty[name] = val.replace(/[^0-9]/g,'');
   render();
 }
-function setCalcRowType(idx,val){ calcRows[idx].type = val; render(); }
-function setCalcRowQty(idx,val){ calcRows[idx].qty = val.replace(/[^0-9]/g,''); render(); }
 
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
 function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; render(); }
@@ -871,7 +875,7 @@ function renderPosView(posId){
   const bc = POS_BC[posId];
   const m = posId.match(/^([A-Z]+)(\d+)-(\d+)-(\d+)([FB])$/);
   const aisle=m?m[1]:'', cube=m?m[2]:'', floor=m?parseInt(m[3]):0, pos=m?parseInt(m[4]):0, side=m?m[5]:'';
-  const sideLabel = side==='F' ? '🔵 פרונט' : side==='B' ? '🟣 בק' : '';
+  const sideLabel = side==='F' ? '🔵 FRONT' : side==='B' ? '🟣 BACK' : '';
 
   let html = `<div class="pos-view">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
@@ -1030,12 +1034,17 @@ function renderPosView(posId){
   return html;
 }
 
+const TAB_LABELS = {map:'מפה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב',emptyReport:'פנוי'};
+function backTabBtn(){
+  if(!previousTab || previousTab===tab) return '';
+  return `<span class="bk" onclick="goBackTab()">&#8592; ${TAB_LABELS[previousTab]||'חזרה'}</span>`;
+}
 function hdrLabel(){
   if(tab==='map'){
     if(mPos) return `<span class="bk" onclick="backFromPos()">&#8592; חזרה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${mPos}</span>`;
     if(mCube) return `<span class="bk" onclick="backCube()">&#8592; ${mAisle}</span><span>קובייה ${mCube}</span>`;
     if(mAisle) return `<span class="bk" onclick="backAisle()">&#8592; מפה</span><span>מעבר ${mAisle}</span>`;
-    return 'מפת אחסנה';
+    return backTabBtn() + '<span>מפת אחסנה</span>';
   }
   if(tab==='scan' && scanPos){
     return `<span class="bk" onclick="resetScan()">&#8592; סריקה</span><span style="font-family:monospace;color:var(--acc);font-size:13px;font-weight:900;letter-spacing:1px">${scanPos}</span>`;
@@ -1043,7 +1052,7 @@ function hdrLabel(){
   if(tab==='emptyReport' && emptyReportAisle){
     return `<span class="bk" onclick="backEmptyReportAisleList()">&#8592; דוח</span><span>מעבר ${emptyReportAisle}</span>`;
   }
-  return {map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב מיקומים',emptyReport:'📊 עמדות פנויות'}[tab]||'';
+  return backTabBtn() + `<span>${({map:'מפת אחסנה',scan:'סריקה',search:'חיפוש',log:'יומן',settings:'הגדרות',calc:'חישוב מיקומים',emptyReport:'📊 עמדות פנויות'})[tab]||''}</span>`;
 }
 
 function render(){
@@ -1128,9 +1137,9 @@ function render(){
           <div class="row-id">קומה ${p2(f)}</div>
           <div class="row-meta">${used}/6 תפוסות</div>
         </div>
-        <div style="font-size:9px;color:var(--blue);font-weight:700">🔵 פרונט</div>
+        <div style="font-size:9px;color:var(--blue);font-weight:700">🔵 FRONT</div>
         <div style="display:flex;gap:5px">${positionsF.map(renderBox).join('')}</div>
-        <div style="font-size:9px;color:#C77DFF;font-weight:700;margin-top:2px">🟣 בק</div>
+        <div style="font-size:9px;color:#C77DFF;font-weight:700;margin-top:2px">🟣 BACK</div>
         <div style="display:flex;gap:5px">${positionsB.map(renderBox).join('')}</div>
       </div>`;
     }).join('');
@@ -1159,7 +1168,10 @@ function render(){
   else if(tab==='search'){
     const qUp = sq.toUpperCase(), qLow = sq.toLowerCase();
     const results = [];
+    let directPosMatch = null;
     if(sq.length>=2){
+      if(POS_BC_REV[qUp]) directPosMatch = POS_BC_REV[qUp];
+      else if(POS_BC[qUp]) directPosMatch = qUp;
       ALL_POS.forEach(posId=>{
         itemsOf(posId).forEach(([itemId,item])=>{
           if(item.sku.includes(qUp) || (item.name||'').toLowerCase().includes(qLow) || (item.cartonBarcode||'').includes(qUp)){
@@ -1174,13 +1186,23 @@ function render(){
 
     contentHtml = `<div class="fg" style="margin-bottom:11px">
       <div style="display:flex;gap:6px">
-        <input id="search-input" class="finp rtl" style="flex:1;font-size:15px;padding:10px 11px" placeholder="חפש דגם / SKU / מספר קרטון..." value="${esc(sq)}"
+        <input id="search-input" class="finp rtl" style="flex:1;font-size:15px;padding:10px 11px" placeholder="חפש דגם / SKU / מספר קרטון / ברקוד מיקום..." value="${esc(sq)}"
           oninput="setSQ(this.value)">
         <button type="button" class="btn btn-blue btn-sm" style="flex-shrink:0" onclick="scanSearchCamera()">📷</button>
       </div>
     </div>`;
 
-    if(sq.length>=2 && results.length===0) contentHtml += `<div class="empty">לא נמצאו תוצאות עבור "${esc(sq)}"</div>`;
+    if(directPosMatch){
+      contentHtml += `<div class="sr" style="border-color:var(--acc)" onclick="goToPosFromSearch('${directPosMatch}')">
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--acc);font-weight:800">📍 ברקוד מיקום נמצא</div>
+          <div style="font-family:monospace;font-size:14px;font-weight:900;color:var(--acc);margin-top:2px">${directPosMatch}</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px">${isOccupied(directPosMatch) ? itemsOf(directPosMatch).length+' דגמים במיקום — לחצו למעבר' : 'עמדה ריקה — לחצו למעבר'}</div>
+        </div>
+      </div>`;
+    }
+
+    if(sq.length>=2 && results.length===0 && !directPosMatch) contentHtml += `<div class="empty">לא נמצאו תוצאות עבור "${esc(sq)}"</div>`;
 
     if(sq.length>=2 && results.length>0){
       contentHtml += `<div style="background:var(--card);border:1px solid var(--b);border-radius:var(--r);padding:10px 12px;margin-bottom:9px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
@@ -1219,14 +1241,14 @@ function render(){
   }
   else if(tab==='calc'){
     contentHtml = `<div class="fsec" style="text-align:center">
-      <div class="sec-ttl">מידות עמדה בודדת (פרונט + בק יחד)</div>
+      <div class="sec-ttl">מידות עמדה בודדת (FRONT + BACK יחד)</div>
       <svg viewBox="0 0 300 175" style="width:100%;max-width:260px;display:block;margin:6px auto">
         <polygon points="60,55 200,55 235,25 95,25" fill="rgba(240,196,25,.15)" stroke="#F0C419" stroke-width="1.5"/>
         <polygon points="200,55 235,25 235,95 200,125" fill="rgba(240,196,25,.08)" stroke="#F0C419" stroke-width="1.5"/>
         <rect x="60" y="55" width="140" height="70" fill="#1F1F1F" stroke="#F0C419" stroke-width="2"/>
         <line x1="130" y1="55" x2="130" y2="125" stroke="#666" stroke-width="1" stroke-dasharray="3,3"/>
-        <text x="95" y="93" text-anchor="middle" fill="#60A5FA" font-size="11" font-weight="700">בק</text>
-        <text x="165" y="93" text-anchor="middle" fill="#C77DFF" font-size="11" font-weight="700">פרונט</text>
+        <text x="95" y="93" text-anchor="middle" fill="#60A5FA" font-size="11" font-weight="700">BACK</text>
+        <text x="165" y="93" text-anchor="middle" fill="#C77DFF" font-size="11" font-weight="700">FRONT</text>
         <line x1="60" y1="136" x2="200" y2="136" stroke="#888" stroke-width="1"/>
         <line x1="60" y1="132" x2="60" y2="140" stroke="#888" stroke-width="1"/>
         <line x1="200" y1="132" x2="200" y2="140" stroke="#888" stroke-width="1"/>
@@ -1239,7 +1261,7 @@ function render(){
       </svg>
     </div>`;
 
-    contentHtml += `<div class="sec-ttl">קיבולת לפי סוג קרטון</div>
+    contentHtml += `<div class="sec-ttl">בחרו סוג קרטון — לחצו על הכרטיס להזנת כמות</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px">` +
       Object.entries(CARTON_TYPES).map(([name,c])=>{
         const isWhite = name.includes('לבן');
@@ -1249,73 +1271,44 @@ function render(){
         const icon = isSack
           ? `<path d="M13,9 Q13,3 20,3 Q27,3 27,9 L29,29 Q29,32 26,32 L14,32 Q11,32 11,29 Z" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5"/>`
           : `<rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/><polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/><line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>`;
-        return `<div style="background:var(--surf);border:1px solid var(--b);border-radius:9px;padding:11px;text-align:center">
-          <svg viewBox="0 0 40 34" style="width:40px;height:34px">${icon}</svg>
-          <div style="font-size:11.5px;font-weight:700;margin-top:5px">${name}</div>
-          <div style="font-size:24px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:3px">${c.capacity}</div>
-          <div style="font-size:9.5px;color:var(--sub)">${c.forceCombined?'לעמדה משולבת (פרונט+בק)':'לכל צד בנפרד'}</div>
-          ${c.blockedSlots && c.blockedSlots.length ? `<div style="font-size:9px;color:var(--red);margin-top:3px">⛔ חסום בעמדה 03</div>` : ''}
+        const isSelected = calcSelected.has(name);
+        const qty = parseInt(calcQty[name])||0;
+        const posNeeded = qty>0 ? Math.ceil(qty/c.capacity) : 0;
+        return `<div onclick="${isSelected?'':`toggleCalcType('${name}')`}"
+          style="background:${isSelected?'var(--ad)':'var(--surf)'};border:1.5px solid ${isSelected?'var(--acc)':'var(--b)'};border-radius:9px;padding:11px;text-align:center;cursor:${isSelected?'default':'pointer'}">
+          <div onclick="${isSelected?`toggleCalcType('${name}')`:''}" style="${isSelected?'cursor:pointer':''}">
+            <svg viewBox="0 0 40 34" style="width:40px;height:34px">${icon}</svg>
+            <div style="font-size:11.5px;font-weight:700;margin-top:5px">${name}</div>
+            <div style="font-size:24px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:3px">${c.capacity}</div>
+            <div style="font-size:9.5px;color:var(--sub)">${c.forceCombined?'ליחידת FRONT+BACK':'לכל צד בנפרד'}</div>
+            ${c.blockedSlots && c.blockedSlots.length ? `<div style="font-size:9px;color:var(--red);margin-top:3px">⛔ חסום בעמדה 03</div>` : ''}
+          </div>
+          ${isSelected?`
+            <div onclick="event.stopPropagation()" style="margin-top:9px;border-top:1px solid var(--ag);padding-top:9px">
+              <input id="calc-qty-${name}" class="finp" type="text" inputmode="numeric" placeholder="כמות..." value="${esc(calcQty[name]||'')}"
+                oninput="setCalcQty('${name}',this.value)" style="text-align:center;font-size:15px">
+              ${qty>0?`<div style="margin-top:8px">
+                <div style="font-size:26px;font-weight:900;color:var(--acc);line-height:1">${posNeeded}</div>
+                <div style="font-size:9px;color:var(--sub)">${c.forceCombined?'עמדות משולבות':'צדדים'} נדרשים</div>
+              </div>`:''}
+            </div>
+          `:''}
         </div>`;
       }).join('') +
       `</div>`;
 
-    contentHtml += `<div class="sec-ttl">חישוב מיקומים נדרשים</div>`;
-
-    calcRows.forEach((row,idx)=>{
-      const c = CARTON_TYPES[row.type];
-      const qty = parseInt(row.qty)||0;
-      const posNeeded = qty>0 ? Math.ceil(qty/c.capacity) : 0;
-      const isWhite = row.type.includes('לבן');
-      const isSack = row.type.includes('שק');
-      const boxFill = isWhite ? '#E8E4D8' : '#8B5E3C';
-      const boxStroke = isWhite ? '#B8B4A8' : '#5C3B22';
-      const icon = isSack
-        ? `<path d="M13,9 Q13,3 20,3 Q27,3 27,9 L29,29 Q29,32 26,32 L14,32 Q11,32 11,29 Z" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5"/>`
-        : `<rect x="4" y="12" width="32" height="19" fill="${boxFill}" stroke="${boxStroke}" stroke-width="1.5" rx="1.5"/><polyline points="4,12 20,4 36,12" fill="none" stroke="${boxStroke}" stroke-width="1.5"/><line x1="20" y1="4" x2="20" y2="31" stroke="${boxStroke}" stroke-width="1" opacity="0.5"/>`;
-      const capDetail = c.special
-        ? `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> ליחידת פרונט+בק משולבת. עמדה 03 חסומה לסוג הזה בכל המחסן.`
-        : c.forceCombined
-          ? `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> לעמדה משולבת פרונט+בק (${c.perWidth} לרוחב × ${c.perDepthFull} לעומק מלא × ${c.perHeight} לגובה) — הקרטון עמוק מדי בשביל חצי עמדה בלבד`
-          : `קיבולת: <b style="color:var(--acc)">${c.capacity}</b> לכל צד בנפרד — פרונט או בק (${c.perWidth} לרוחב × ${c.perDepthHalf} לעומק חצי × ${c.perHeight} לגובה)`;
-      contentHtml += `<div class="fsec">
-        <div class="frow">
-          <div class="fg">
-            <label class="flbl">סוג קרטון</label>
-            <select class="finp rtl" onchange="setCalcRowType(${idx},this.value)">
-              ${Object.keys(CARTON_TYPES).map(t=>`<option ${row.type===t?'selected':''}>${t}</option>`).join('')}
-            </select>
-          </div>
-          <div class="fg">
-            <label class="flbl">כמות</label>
-            <input id="calc-qty-${idx}" class="finp" type="text" inputmode="numeric" placeholder="0"
-              value="${esc(row.qty)}" oninput="setCalcRowQty(${idx},this.value)" style="font-size:16px">
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--sub);margin-bottom:8px">${capDetail}</div>
-        ${qty>0?`<div style="background:var(--surf);border-radius:var(--rs);padding:14px 10px;text-align:center;margin-bottom:8px;display:flex;align-items:center;justify-content:center;gap:14px">
-          <svg viewBox="0 0 40 34" style="width:34px;height:29px;flex-shrink:0">${icon}</svg>
-          <div>
-            <div style="font-size:30px;font-weight:900;color:var(--acc);line-height:1">${posNeeded}</div>
-            <div style="font-size:11px;color:var(--sub)">${c.forceCombined?'עמדות משולבות (פרונט+בק) נדרשות':'צדדים (פרונט/בק) נדרשים'}</div>
-          </div>
-        </div>`:''}
-        ${calcRows.length>1?`<button class="btn btn-d btn-sm btn-w" onclick="removeCalcRow(${idx})">הסר שורה</button>`:''}
-      </div>`;
-    });
-
-    contentHtml += `<button class="btn btn-g btn-w" onclick="addCalcRow()" style="margin-bottom:10px">➕ הוסף סוג קרטון נוסף</button>`;
-
-    const totalQty = calcRows.reduce((s,r)=>s+(parseInt(r.qty)||0),0);
-    const totalPos = calcRows.reduce((s,r)=>{
-      const q=parseInt(r.qty)||0;
-      return s + (q>0 ? Math.ceil(q/CARTON_TYPES[r.type].capacity) : 0);
+    const selectedList = Object.keys(calcQty).filter(name=>calcSelected.has(name) && (parseInt(calcQty[name])||0)>0);
+    const totalQty = selectedList.reduce((s,name)=>s+(parseInt(calcQty[name])||0),0);
+    const totalPos = selectedList.reduce((s,name)=>{
+      const q=parseInt(calcQty[name])||0;
+      return s + Math.ceil(q/CARTON_TYPES[name].capacity);
     },0);
     if(totalQty>0){
       contentHtml += `<div class="fsec" style="text-align:center">
         <div class="sec-ttl">סה"כ כללי</div>
         <div style="font-size:40px;line-height:1">📍</div>
         <div style="font-size:40px;font-weight:900;color:var(--acc);line-height:1.1;margin-top:2px">${totalPos}</div>
-        <div style="font-size:12px;color:var(--sub)">סה"כ נדרשים (${totalQty} יחידות) — שימו לב: זה מערבב יחד ספירת "צדדים" וספירת "עמדות משולבות", בדקו כל שורה בנפרד לפירוט מדויק</div>
+        <div style="font-size:12px;color:var(--sub)">סה"כ נדרשים (${totalQty} יחידות) — שימו לב: זה מערבב יחד ספירת "צדדים" וספירת "עמדות משולבות", בדקו כל כרטיס בנפרד לפירוט מדויק</div>
       </div>`;
     }
   }
@@ -1422,7 +1415,7 @@ function render(){
         <div class="info-row"><span>קוביות לכל מעבר</span><span class="info-val">16</span></div>
         <div class="info-row"><span>קומות (רגיל)</span><span class="info-val">1–11</span></div>
         <div class="info-row"><span>קומות (קוביות 4 ו-11)</span><span class="info-val">5–11 (למעט ZI: 1–11)</span></div>
-        <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3 (× פרונט/בק = 6)</span></div>
+        <div class="info-row"><span>עמדות לקומה</span><span class="info-val">3 (× FRONT/BACK = 6)</span></div>
         <div class="info-row"><span>סה"כ עמדות</span><span class="info-val">${ALL_POS.length.toLocaleString()}</span></div>
       </div>
       <div class="settings-sec">
@@ -1594,6 +1587,7 @@ function navBtn(id,lbl,svgInner){
 
 function switchTab(id){
   if(id!==tab){
+    previousTab = tab;
     editingItem=null; fOriginalUpdatedAt=null; editConflictInfo=null;
     assigningCartonFor=null; cartonScanVal=""; pendingCartonBc=null; cartonConflictInfo=null;
     changingLocationFor=null; newLocScanVal=""; pendingNewLoc=null;
@@ -1604,6 +1598,9 @@ function switchTab(id){
   tab=id;
   render();
   if(id==='scan') setTimeout(()=>{const el=document.getElementById('scan-input'); if(el) el.focus();},100);
+}
+function goBackTab(){
+  if(previousTab) switchTab(previousTab);
 }
 
 // Expose functions used by inline onclick handlers
@@ -1648,6 +1645,7 @@ window.importSeedData = ()=>{
   }
 };
 window.switchTab = switchTab;
+window.goBackTab = goBackTab;
 window.render = render;
 window.setAisle = (a)=>{ mAisle=a; render(); };
 window.setCube = (c)=>{ mCube=c; render(); };
@@ -1678,10 +1676,8 @@ window.cancelChangeLocation = cancelChangeLocation;
 window.resolveChangeLocation = resolveChangeLocation;
 window.confirmChangeLocation = confirmChangeLocation;
 window.setNewLocScanVal = (v)=>{ newLocScanVal = v.toUpperCase(); };
-window.addCalcRow = addCalcRow;
-window.removeCalcRow = removeCalcRow;
-window.setCalcRowType = setCalcRowType;
-window.setCalcRowQty = setCalcRowQty;
+window.toggleCalcType = toggleCalcType;
+window.setCalcQty = setCalcQty;
 window.goToPosition = goToPosition;
 window.setEmptyReportAisle = setEmptyReportAisle;
 window.backEmptyReportAisleList = backEmptyReportAisleList;
