@@ -265,9 +265,16 @@ let data = {};
 let allowedUsers = {}; // { phoneKey: {name, phone, active, isAdmin, addedAt} }
 let newUserName = "", newUserPhone = "", newUserIsAdmin = false;
 let movs = [];
+let logSearch = ""; // טקסט חיפוש בעמוד היומן
+let logOpenDates = new Set(); // מפתחות תאריך (YYYY-MM-DD) שפתוחים כרגע ביומן
+let modelsListOpen = false; // האם רשימת כל הדגמים באחסנה פתוחה בעמוד הבית
 let tab = "map";
 let previousTab = null; // לכפתור "חזרה לעמוד הקודם" הכללי
 let mAisle=null, mCube=null, mPos=null;
+// ── מצב עריכה/החלפת FRONT⇄BACK בגרירה בתוך קומה ─────────────────────────────
+let editingFloor=null; // מספר הקומה שנמצאת כרגע במצב עריכה (בתוך הקוביה/מעבר הנוכחיים), או null
+let floorSwapPending=new Set(); // מספרי עמדה ('01','02','03') שסומנו להחלפה בקומה שבעריכה
+let dragSrcPid=null; // ה-pid שגוררים כרגע (לצורך תיקוף שהגרירה מותרת)
 let scanVal="", scanPos=null, scanErr="";
 
 // editingItem: null, or {posId, itemId} — itemId===null means "adding a new item"
@@ -760,6 +767,83 @@ async function confirmChangeLocation(){
   render();
 }
 
+// ── עריכת קומה: החלפת תכולה בגרירה בין FRONT ל-BACK באותו מספר עמדה ─────────
+function toggleFloorEdit(f){
+  editingFloor = (editingFloor===f) ? null : f;
+  floorSwapPending = new Set();
+  dragSrcPid = null;
+  render();
+}
+function cancelFloorEdit(){
+  editingFloor = null;
+  floorSwapPending = new Set();
+  dragSrcPid = null;
+  render();
+}
+function isValidSwapTarget(srcPid, targetPid){
+  if(!srcPid || !targetPid || srcPid===targetPid) return false;
+  const srcSide = srcPid.slice(-1), tgtSide = targetPid.slice(-1);
+  const srcNum  = srcPid.slice(-3,-1), tgtNum = targetPid.slice(-3,-1);
+  // מותר להחליף רק בין FRONT ל-BACK באותו מספר עמדה (למשל 01F ↔ 01B בלבד)
+  return srcSide!==tgtSide && srcNum===tgtNum;
+}
+function onDragStartPos(ev, pid){
+  dragSrcPid = pid;
+  try{ ev.dataTransfer.effectAllowed='move'; ev.dataTransfer.setData('text/plain', pid); }catch(e){}
+}
+function onDragOverPos(ev, pid){
+  if(isValidSwapTarget(dragSrcPid, pid)) ev.preventDefault(); // preventDefault = מאשר drop
+}
+function onDropPos(ev, pid){
+  ev.preventDefault();
+  const srcPid = dragSrcPid;
+  dragSrcPid = null;
+  if(!isValidSwapTarget(srcPid, pid)) return;
+  const posNum = pid.slice(-3,-1);
+  if(floorSwapPending.has(posNum)) floorSwapPending.delete(posNum); // גרירה חוזרת מבטלת את הסימון
+  else floorSwapPending.add(posNum);
+  render();
+}
+function onDragEndPos(){ dragSrcPid = null; render(); }
+
+// שומרת בפועל את כל ההחלפות שסומנו בקומה שבעריכה (לחיצה יחידה על "שמור")
+async function saveFloorSwaps(){
+  if(editingFloor==null || !floorSwapPending.size || !mAisle || !mCube) return;
+  const f = editingFloor;
+  const nowIso = new Date().toISOString();
+  const swapped = [];
+  for(const posNum of floorSwapPending){
+    const fPid = `${mAisle}${mCube}-${p2(f)}-${posNum}F`;
+    const bPid = `${mAisle}${mCube}-${p2(f)}-${posNum}B`;
+    const fItems = data[fPid]?.items || {};
+    const bItems = data[bPid]?.items || {};
+    if(!Object.keys(fItems).length && !Object.keys(bItems).length) continue; // שתי עמדות ריקות — אין מה להחליף
+    if(Object.keys(bItems).length) await db.ref(`positions/${fkey(fPid)}`).set({items: bItems});
+    else await db.ref(`positions/${fkey(fPid)}`).remove();
+    if(Object.keys(fItems).length) await db.ref(`positions/${fkey(bPid)}`).set({items: fItems});
+    else await db.ref(`positions/${fkey(bPid)}`).remove();
+    for(const item of Object.values(fItems)){
+      await db.ref('movements/'+mkId()).set({
+        ts:nowIso, pos:bPid, fromPos:fPid, type:'move', sku:item.sku, qty:item.qty, unit:item.unit,
+        carton: item.cartonBarcode||null, by: currentUserLabel(),
+        alertPending: CURRENT_USER.phone==='121212' ? true : null
+      });
+    }
+    for(const item of Object.values(bItems)){
+      await db.ref('movements/'+mkId()).set({
+        ts:nowIso, pos:fPid, fromPos:bPid, type:'move', sku:item.sku, qty:item.qty, unit:item.unit,
+        carton: item.cartonBarcode||null, by: currentUserLabel(),
+        alertPending: CURRENT_USER.phone==='121212' ? true : null
+      });
+    }
+    swapped.push(posNum);
+  }
+  notify(swapped.length ? `✓ הוחלפו ${swapped.length} עמדות בקומה ${p2(f)}` : 'לא היה מה להחליף');
+  editingFloor = null;
+  floorSwapPending = new Set();
+  render();
+}
+
 // ── סריקה ────────────────────────────────────────────────────────────────────
 function doScan(){
   const v = (scanVal||'').trim().toUpperCase(); if(!v) return;
@@ -780,6 +864,13 @@ function safePhoneKeyClient(phone){ return String(phone||'').replace(/\D/g,''); 
 function setNewUserName(v){ newUserName=v; render(); }
 function setNewUserPhone(v){ newUserPhone=v; render(); }
 function toggleNewUserIsAdmin(v){ newUserIsAdmin=v; render(); }
+
+// ── רשימת דגמים (עמוד הבית) ─────────────────────────────────────────────────
+function toggleModelsList(){ modelsListOpen = !modelsListOpen; render(); }
+
+// ── חיפוש וקיבוץ לפי יום (עמוד היומן) ───────────────────────────────────────
+function setLogSearch(v){ logSearch=v; render(); }
+function toggleLogDate(key){ if(logOpenDates.has(key)) logOpenDates.delete(key); else logOpenDates.add(key); render(); }
 async function addAllowedUser(){
   const name = newUserName.trim();
   const phoneKey = safePhoneKeyClient(newUserPhone);
@@ -1066,6 +1157,17 @@ function render(){
   const allItems = [];
   occupiedPositions.forEach(pos=>itemsOf(pos).forEach(([itemId,item])=>allItems.push(item)));
   const uniqSKUs = new Set(allItems.map(i=>i.sku)).size;
+  // מפה של דגם (SKU) → סה"כ נתונים מצטברים, כדי שלא יופיע אף דגם פעמיים ברשימה
+  const skuMap = new Map();
+  allItems.forEach(it=>{
+    if(!it.sku) return;
+    if(!skuMap.has(it.sku)) skuMap.set(it.sku, {name: it.name||'', qty:0, unit: it.unit||'', count:0});
+    const s = skuMap.get(it.sku);
+    s.qty += Number(it.qty)||0;
+    s.count += 1;
+    if(!s.name && it.name) s.name = it.name;
+  });
+  const skuList = Array.from(skuMap.entries()).sort((a,b)=> a[0].localeCompare(b[0],'he'));
 
   let contentHtml = '';
 
@@ -1084,9 +1186,23 @@ function render(){
       <div class="stats">
         <div class="stat"><div class="stat-n">${usedCount}</div><div class="stat-l">תפוסים</div></div>
         <div class="stat"><div class="stat-n">${totalCount-usedCount}</div><div class="stat-l">פנויים</div></div>
-        <div class="stat"><div class="stat-n">${uniqSKUs}</div><div class="stat-l">דגמים</div></div>
+        <div class="stat" style="cursor:pointer" onclick="toggleModelsList()"><div class="stat-n">${uniqSKUs}</div><div class="stat-l">דגמים</div></div>
         <div class="stat"><div class="stat-n">${totalCount?Math.round(usedCount/totalCount*100):0}%</div><div class="stat-l">תפוסה</div></div>
       </div>
+      ${modelsListOpen ? `
+      <div class="fsec" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:800;color:var(--acc)">כל הדגמים באחסנה (${skuList.length})</div>
+          <svg onclick="toggleModelsList()" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="color:var(--sub);cursor:pointer;flex-shrink:0"><polyline points="18 15 12 9 6 15"/></svg>
+        </div>
+        <div class="list" style="max-height:300px;overflow-y:auto">
+          ${skuList.map(([sku,info])=>`
+            <div class="row" style="cursor:default">
+              <div class="row-id">${esc(sku)}</div>
+              <div class="row-meta">${info.name?esc(info.name)+' · ':''}${info.qty} ${esc(info.unit)}${info.count>1?` · ${info.count} מיקומים`:''}</div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
       <div class="sec-ttl">מעברים</div>
       <div class="grid3">${tiles}</div>
       <button class="btn btn-blue btn-w" onclick="exportToExcel()" style="margin-top:4px">📥 ייצוא מלאי לאקסל</button>`;
@@ -1107,9 +1223,10 @@ function render(){
     contentHtml = `<div class="list">${rows}</div>`;
   }
   else if(tab==='map' && mAisle && mCube && !mPos){
-    const renderBox = (pid) => {
+    const renderBox = (pid, editable) => {
       const items = itemsOf(pid);
       const posNum = pid.slice(-3,-1);
+      const pendingSwap = editable && floorSwapPending.has(posNum);
       let inner;
       if(items.length===0){
         inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
@@ -1122,9 +1239,15 @@ function render(){
           ${it.name?`<div style="font-size:9.5px;color:var(--txt);margin-top:1px">${esc(it.name)}</div>`:''}
           <div style="font-size:9.5px;color:var(--sub);margin-top:1px">${cartonLine}${extra}</div>`;
       }
-      return `<div onclick="setPos('${pid}')"
-        style="flex:1;background:${items.length?'var(--ad)':'var(--surf)'};border:1px solid ${items.length?'var(--ag)':'var(--b)'};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:pointer">
-        <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}</div>
+      const clickAttr = editable ? '' : `onclick="setPos('${pid}')"`;
+      const dragAttrs = editable
+        ? `draggable="true" ondragstart="onDragStartPos(event,'${pid}')" ondragover="onDragOverPos(event,'${pid}')" ondrop="onDropPos(event,'${pid}')" ondragend="onDragEndPos()"`
+        : '';
+      const border = pendingSwap ? 'var(--acc)' : (items.length?'var(--ag)':'var(--b)');
+      const bg = pendingSwap ? 'var(--ag)' : (items.length?'var(--ad)':'var(--surf)');
+      return `<div ${clickAttr} ${dragAttrs}
+        style="flex:1;background:${bg};border:1px ${pendingSwap?'dashed':'solid'} ${border};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:${editable?'grab':'pointer'};user-select:none">
+        <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}${pendingSwap?' 🔁':''}</div>
         ${inner}
       </div>`;
     };
@@ -1132,15 +1255,28 @@ function render(){
       const positionsF = [`${mAisle}${mCube}-${p2(f)}-01F`,`${mAisle}${mCube}-${p2(f)}-02F`,`${mAisle}${mCube}-${p2(f)}-03F`];
       const positionsB = [`${mAisle}${mCube}-${p2(f)}-01B`,`${mAisle}${mCube}-${p2(f)}-02B`,`${mAisle}${mCube}-${p2(f)}-03B`];
       const used = [...positionsF,...positionsB].filter(isOccupied).length;
-      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:5px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="row-id">קומה ${p2(f)}</div>
-          <div class="row-meta">${used}/6 תפוסות</div>
+      const isEditingThisFloor = editingFloor===f;
+      return `<div class="row" style="flex-direction:column;align-items:stretch;gap:5px${isEditingThisFloor?';border-color:var(--acc)':''}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="row-id">קומה ${p2(f)}</div>
+            <div class="row-meta">${used}/6 תפוסות</div>
+          </div>
+          <svg onclick="toggleFloorEdit(${f})" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="cursor:pointer;flex-shrink:0;color:${isEditingThisFloor?'var(--acc)':'var(--sub)'}">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
         </div>
         <div style="font-size:9px;color:var(--blue);font-weight:700">🔵 FRONT</div>
-        <div style="display:flex;gap:5px">${positionsF.map(renderBox).join('')}</div>
+        <div style="display:flex;gap:5px">${positionsF.map(pid=>renderBox(pid,isEditingThisFloor)).join('')}</div>
         <div style="font-size:9px;color:#C77DFF;font-weight:700;margin-top:2px">🟣 BACK</div>
-        <div style="display:flex;gap:5px">${positionsB.map(renderBox).join('')}</div>
+        <div style="display:flex;gap:5px">${positionsB.map(pid=>renderBox(pid,isEditingThisFloor)).join('')}</div>
+        ${isEditingThisFloor ? `
+        <div style="font-size:9.5px;color:var(--acc);margin-top:2px">✋ גררי עמדת FRONT לעמדת BACK באותו מספר (או להיפך) כדי לסמן להחלפה</div>
+        <div style="display:flex;gap:6px;margin-top:2px">
+          <button class="btn btn-p btn-sm btn-w" onclick="saveFloorSwaps()" ${floorSwapPending.size?'':'disabled'}>💾 שמור החלפות (${floorSwapPending.size})</button>
+          <button class="btn btn-g btn-sm" onclick="cancelFloorEdit()">ביטול</button>
+        </div>` : ''}
       </div>`;
     }).join('');
     contentHtml = `<div class="list">${rows}</div>`;
@@ -1370,44 +1506,93 @@ function render(){
     }
   }
   else if(tab==='log'){
+    const movIcon = t => t==='in'?'in':t==='out'?'out':t==='move'?'move':t==='link'?'link':'edit';
+    const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
+    const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
+
+    const renderMovRow = (m) => {
+      if(m.type==='move' && m.alertPending){
+        // התראה בולטת ואדומה (בסגנון וואטסאפ) — רק לשינויי מיקום שביצע עובד מחסן (121212).
+        // נעלמת (הופכת לשורה רגילה) ברגע שלוחצים עליה.
+        return `<div onclick="dismissMoveAlert('${m._key}')" style="cursor:pointer;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:11px 14px;margin-bottom:9px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="width:24px;height:24px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#fff">🔀</div>
+            <div style="font-size:12px;font-weight:900;color:var(--red)">📍 מיקום שונה ומתעדכן במערכת</div>
+          </div>
+          <div style="font-family:monospace;font-size:13px;font-weight:800;color:var(--acc);margin-top:7px">
+            ${esc(m.fromPos)} &#8592; ${esc(m.pos)}
+          </div>
+          <div style="font-size:11px;color:var(--sub);margin-top:2px">${esc(m.sku)} · ${m.qty} ${esc(m.unit)}${m.carton?` · קרטון ${esc(m.carton)}`:''}</div>
+          <div style="font-size:10px;color:var(--mut);margin-top:3px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''} · לחצו לסימון כנצפה</div>
+        </div>`;
+      }
+      return `<div class="mov">
+      <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
+      <div style="flex:1">
+        <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
+          ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-top:1px">
+          ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+          ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
+          ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
+        </div>
+        <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
+      </div>
+    </div>`;
+    };
+
+    const searchBar = `<div class="fg" style="margin-bottom:11px">
+      <input id="log-search-input" class="finp rtl" placeholder="🔍 חיפוש לפי תאריך / פעולה / עובד / דגם / קרטון / מיקום" value="${esc(logSearch)}"
+        oninput="setLogSearch(this.value)">
+    </div>`;
+
     if(!movs.length){
       contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
     } else {
-      const movIcon = t => t==='in'?'in':t==='out'?'out':t==='move'?'move':t==='link'?'link':'edit';
-      const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
-      const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
-      contentHtml = `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${movs.length} תנועות</div>` +
-        movs.map(m=>{
-          if(m.type==='move' && m.alertPending){
-            // התראה בולטת ואדומה (בסגנון וואטסאפ) — רק לשינויי מיקום שביצע עובד מחסן (121212).
-            // נעלמת (הופכת לשורה רגילה) ברגע שלוחצים עליה.
-            return `<div onclick="dismissMoveAlert('${m._key}')" style="cursor:pointer;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:11px 14px;margin-bottom:9px">
-              <div style="display:flex;align-items:center;gap:8px">
-                <div style="width:24px;height:24px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#fff">🔀</div>
-                <div style="font-size:12px;font-weight:900;color:var(--red)">📍 מיקום שונה ומתעדכן במערכת</div>
-              </div>
-              <div style="font-family:monospace;font-size:13px;font-weight:800;color:var(--acc);margin-top:7px">
-                ${esc(m.fromPos)} &#8592; ${esc(m.pos)}
-              </div>
-              <div style="font-size:11px;color:var(--sub);margin-top:2px">${esc(m.sku)} · ${m.qty} ${esc(m.unit)}${m.carton?` · קרטון ${esc(m.carton)}`:''}</div>
-              <div style="font-size:10px;color:var(--mut);margin-top:3px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''} · לחצו לסימון כנצפה</div>
-            </div>`;
+      const q = logSearch.trim().toLowerCase();
+      const matchesSearch = (m) => {
+        if(!q) return true;
+        const hay = [m.pos, m.fromPos, m.sku, m.by, m.carton, movLabel(m.type), fmtDT(m.ts), m.prev]
+          .filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(q);
+      };
+      const filtered = movs.filter(matchesSearch);
+
+      if(!filtered.length){
+        contentHtml = searchBar + `<div class="empty">אין תוצאות תואמות לחיפוש</div>`;
+      } else {
+        // קיבוץ התנועות לפי יום קלנדרי (לפי התאריך המקומי של כל פעולה),
+        // כדי שלא תיווצר רשימה ענקית אחת שצריך לגלול בה — כל יום נפתח בלחיצה בנפרד.
+        const groups = [];
+        const byKey = {};
+        filtered.forEach(m=>{
+          const d = new Date(m.ts);
+          const key = d.toLocaleDateString('en-CA'); // מפתח יציב YYYY-MM-DD לקיבוץ
+          if(!byKey[key]){
+            const label = d.toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',weekday:'long'});
+            byKey[key] = {key, label, items:[]};
+            groups.push(byKey[key]);
           }
-          return `<div class="mov">
-          <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
-          <div style="flex:1">
-            <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
-              ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
-            </div>
-            <div style="font-size:11px;color:var(--sub);margin-top:1px">
-              ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
-              ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
-              ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
-            </div>
-            <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
-          </div>
-        </div>`;
-        }).join('');
+          byKey[key].items.push(m);
+        });
+
+        contentHtml = searchBar +
+          `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${filtered.length} תנועות${q?` (מתוך ${movs.length})`:''} · ${groups.length} ימים</div>` +
+          groups.map(g=>{
+            const isOpen = q ? true : logOpenDates.has(g.key); // בזמן חיפוש פעיל נציג את כל הימים התואמים פתוחים
+            return `<div class="sr" style="flex-direction:column;align-items:stretch;padding:0;cursor:default;margin-bottom:8px;overflow:hidden">
+              <div onclick="toggleLogDate('${g.key}')" style="display:flex;align-items:center;justify-content:space-between;padding:11px 13px;cursor:pointer">
+                <div style="font-size:12px;font-weight:800">📅 ${g.label}</div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span class="badge">${g.items.length}</span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);transform:rotate(${isOpen?90:0}deg);transition:transform .15s;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+              </div>
+              ${isOpen ? `<div style="padding:0 13px 11px">${g.items.map(renderMovRow).join('')}</div>` : ''}
+            </div>`;
+          }).join('');
+      }
     }
   }
   else if(tab==='settings'){
@@ -1609,6 +1794,9 @@ function goBackTab(){
 // Expose functions used by inline onclick handlers
 // (inline onclick runs in global scope, so all state mutation must go through
 // these window-level wrapper functions rather than direct variable assignment)
+window.toggleModelsList = toggleModelsList;
+window.setLogSearch = setLogSearch;
+window.toggleLogDate = toggleLogDate;
 window.openAddItem = openAddItem;
 window.openEditItem = openEditItem;
 window.cancelEditItem = cancelEditItem;
@@ -1650,12 +1838,19 @@ window.importSeedData = ()=>{
 window.switchTab = switchTab;
 window.goBackTab = goBackTab;
 window.render = render;
-window.setAisle = (a)=>{ mAisle=a; render(); };
-window.setCube = (c)=>{ mCube=c; render(); };
-window.setPos = (p)=>{ mPos=p; editingItem=null; render(); };
-window.backCube = ()=>{ mCube=null; render(); };
-window.backAisle = ()=>{ mAisle=null; render(); };
+window.setAisle = (a)=>{ mAisle=a; editingFloor=null; floorSwapPending.clear(); render(); };
+window.setCube = (c)=>{ mCube=c; editingFloor=null; floorSwapPending.clear(); render(); };
+window.setPos = (p)=>{ mPos=p; editingItem=null; editingFloor=null; floorSwapPending.clear(); render(); };
+window.backCube = ()=>{ mCube=null; editingFloor=null; floorSwapPending.clear(); render(); };
+window.backAisle = ()=>{ mAisle=null; editingFloor=null; floorSwapPending.clear(); render(); };
 window.backFromPos = ()=>{ mPos=null; editingItem=null; render(); };
+window.toggleFloorEdit = toggleFloorEdit;
+window.cancelFloorEdit = cancelFloorEdit;
+window.onDragStartPos = onDragStartPos;
+window.onDragOverPos = onDragOverPos;
+window.onDropPos = onDropPos;
+window.onDragEndPos = onDragEndPos;
+window.saveFloorSwaps = saveFloorSwaps;
 window.setFSKU = (v)=>{ fSKU = v.toUpperCase(); };
 window.setFNamePart = setFNamePart;
 window.addFNamePart = addFNamePart;
