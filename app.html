@@ -19,19 +19,22 @@
   --grn:#22C55E;--red:#EF4444;--blue:#60A5FA;
   --r:9px;--rs:5px;
 }
-html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;direction:rtl;min-height:100vh}
-.app{max-width:600px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
-.hdr{background:var(--surf);border-bottom:1px solid var(--b);padding:11px 13px;display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:50}
+html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;direction:rtl;height:100%;overflow:hidden}
+/* מבנה-על יציב: .app תופס בדיוק את גובה המסך (עם overflow:hidden), וגלילה קורית רק בתוך .content —
+   כך שהתפריט התחתון (.nav) הוא ילד רגיל בזרימת ה-flex (לא position:fixed), ולא "מרחף"/קופץ
+   כשה-toolbar הדינמי של ספארי באייפון מופיע/נעלם. זהו הפתרון היציב המקובל לבאג הזה. */
+.app{max-width:600px;margin:0 auto;height:100dvh;height:100svh;display:flex;flex-direction:column;overflow:hidden}
+.hdr{background:var(--surf);border-bottom:1px solid var(--b);padding:12px 13px;display:flex;align-items:center;gap:8px;flex-shrink:0;z-index:50}
 .hdr-t{font-size:14px;font-weight:700;flex:1;display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden}
-.bk{font-size:11px;color:var(--sub);cursor:pointer;padding:2px 5px;border-radius:3px;flex-shrink:0}
+.bk{font-size:12px;color:var(--sub);cursor:pointer;padding:5px 6px;border-radius:5px;flex-shrink:0}
 .bk:hover{color:var(--acc)}
 .badge{background:var(--ad);color:var(--acc);border:1px solid var(--ag);border-radius:20px;padding:2px 8px;font-size:10px;font-weight:800}
-.logout-btn{background:rgba(239,68,68,.09);color:var(--red);border:1px solid rgba(239,68,68,.2);border-radius:20px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap}
-.content{flex:1;overflow-y:auto;padding:12px 12px 82px}
-.nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:600px;background:var(--surf);border-top:1px solid var(--b);display:flex;z-index:100}
-.nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;cursor:pointer;background:none;border:none;color:var(--mut);font-size:9px;font-weight:700;transition:color .15s}
+.logout-btn{background:rgba(239,68,68,.09);color:var(--red);border:1px solid rgba(239,68,68,.2);border-radius:20px;padding:5px 10px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap}
+.content{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 12px 16px}
+.nav{width:100%;background:var(--surf);border-top:1px solid var(--b);display:flex;flex-shrink:0;padding-bottom:env(safe-area-inset-bottom,0)}
+.nb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:9px 2px;min-height:54px;cursor:pointer;background:none;border:none;color:var(--mut);font-size:10px;font-weight:700;transition:color .15s}
 .nb.on{color:var(--acc)}
-.nb svg{width:18px;height:18px;stroke-width:1.8}
+.nb svg{width:21px;height:21px;stroke-width:1.8}
 .stats{display:flex;gap:6px;margin-bottom:12px}
 .stat{flex:1;background:var(--card);border-radius:var(--r);border:1px solid var(--b);padding:9px 4px;text-align:center}
 .stat-n{font-size:19px;font-weight:900;color:var(--acc);line-height:1}
@@ -71,13 +74,13 @@ html,body{background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkM
 .finp.rtl{direction:rtl}
 .finp:focus{border-color:var(--acc)}
 .finp::placeholder{color:var(--mut)}
-.frow{display:flex;gap:7px}
-.frow .fg{flex:1}
+.frow{display:flex;gap:7px;flex-wrap:wrap}
+.frow .fg{flex:1;min-width:130px}
 .fg{margin-bottom:9px}
 select.finp{cursor:pointer}
 .scan-inp{width:100%;background:var(--bg);border:2px solid var(--acc);border-radius:var(--rs);padding:13px 14px;color:var(--txt);font-size:18px;outline:none;font-family:ui-monospace,monospace;letter-spacing:1px;direction:ltr;text-align:center}
 .scan-inp::placeholder{font-size:12px;letter-spacing:0;color:var(--mut);font-family:-apple-system,sans-serif}
-.btn{padding:8px 13px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.btn{padding:11px 15px;min-height:42px;border-radius:var(--rs);font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:5px}
 .btn-p{background:var(--acc);color:#111}
 .btn-p:hover{filter:brightness(1.08)}
 .btn-p:disabled{opacity:.3;cursor:not-allowed}
@@ -85,7 +88,7 @@ select.finp{cursor:pointer}
 .btn-d{background:rgba(239,68,68,.09);color:var(--red);border:1px solid rgba(239,68,68,.2)}
 .btn-blue{background:rgba(96,165,250,.1);color:var(--blue);border:1px solid rgba(96,165,250,.25)}
 .btn-w{width:100%}
-.btn-sm{padding:4px 9px;font-size:11px}
+.btn-sm{padding:7px 11px;min-height:34px;font-size:11.5px}
 .sr{background:var(--card);border-radius:var(--r);padding:10px;margin-bottom:6px;border:1px solid var(--b);cursor:pointer;transition:border-color .15s;display:flex;align-items:center;gap:8px}
 .sr:hover{border-color:var(--acc)}
 .mov{display:flex;gap:9px;padding:10px 0;border-bottom:1px solid var(--b);align-items:flex-start}
@@ -259,6 +262,7 @@ let calcQty = {}; // כמות לכל סוג קרטון נבחר, לפי שם
 
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
 let emptyReportAisle = null; // null = show aisle summary list; else drill into that aisle
+let emptyClosedFloors = new Set(); // מפתחות "מעברקוביה-קומה" (למשל "ZA1-05") שמכווצות בדוח העמדות הפנויות
 
 let data = {};
 // ── ניהול משתמשים מאושרים (למנהלים בלבד) ────────────────────────────────────
@@ -483,6 +487,9 @@ function setCalcQty(name, val){
 function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; render(); }
 function setEmptyReportAisle(a){ emptyReportAisle=a; render(); }
 function backEmptyReportAisleList(){ emptyReportAisle=null; render(); }
+function toggleEmptyFloor(key){ if(emptyClosedFloors.has(key)) emptyClosedFloors.delete(key); else emptyClosedFloors.add(key); render(); }
+function collapseAllEmptyFloors(a,c){ cubeFloors(c,a).forEach(f=>emptyClosedFloors.add(`${a}${c}-${f}`)); render(); }
+function expandAllEmptyFloors(a,c){ cubeFloors(c,a).forEach(f=>emptyClosedFloors.delete(`${a}${c}-${f}`)); render(); }
 function exportEmptyReport(aisle){
   const positions = (aisle ? ALL_POS.filter(p=>p.startsWith(aisle)) : ALL_POS).filter(p=>!isOccupied(p));
   if(positions.length===0){ notify('אין עמדות ריקות לייצוא','warn'); return; }
@@ -846,7 +853,7 @@ async function saveFloorSwaps(){
 
 // ── סריקה ────────────────────────────────────────────────────────────────────
 function doScan(){
-  const v = (scanVal||'').trim().toUpperCase(); if(!v) return;
+  const v = (scanVal||'').trim().toUpperCase(); if(v.length<4) return;
   scanErr='';
   if(POS_BC_REV[v]){ openPos(POS_BC_REV[v]); scanVal=''; render(); return; }
   if(POS_BC[v]){ openPos(v); scanVal=''; render(); return; }
@@ -869,8 +876,110 @@ function toggleNewUserIsAdmin(v){ newUserIsAdmin=v; render(); }
 function toggleModelsList(){ modelsListOpen = !modelsListOpen; render(); }
 
 // ── חיפוש וקיבוץ לפי יום (עמוד היומן) ───────────────────────────────────────
-function setLogSearch(v){ logSearch=v; render(); }
+// עדכון החיפוש לא קורא ל-render() המלא (שהורס ובונה מחדש את כל ה-DOM כולל תיבת הקלט הפוקוסית) —
+// זה גרם לבאג שבו במובייל (iOS) המקלדת "קופצת" בחזרה לאותיות בכל הקשת ספרה, כי ה-<input> נהרס ונבנה מחדש.
+// במקום זה מעדכנים ישירות רק את תוכן div#log-results, ומשאירים את ה-<input> עצמו יציב.
+function setLogSearch(v){
+  logSearch = v;
+  const el = document.getElementById('log-results');
+  if(el && tab==='log'){ el.innerHTML = renderLogResultsHtml(); }
+  else { render(); }
+}
 function toggleLogDate(key){ if(logOpenDates.has(key)) logOpenDates.delete(key); else logOpenDates.add(key); render(); }
+
+// בונה את תוכן תוצאות היומן (חיפוש + קיבוץ לפי יום) כ-HTML, בלי לגעת בשאר הדף —
+// כדי שאפשר יהיה לעדכן רק אותו (ר' setLogSearch) בלי render() מלא.
+function renderLogResultsHtml(){
+  const movIcon = t => t==='in'?'in':t==='out'?'out':t==='move'?'move':t==='link'?'link':'edit';
+  const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
+  const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
+
+  const renderMovRow = (m) => {
+    if(m.type==='move' && m.alertPending){
+      return `<div onclick="dismissMoveAlert('${m._key}')" style="cursor:pointer;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:11px 14px;margin-bottom:9px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:24px;height:24px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#fff">🔀</div>
+          <div style="font-size:12px;font-weight:900;color:var(--red)">📍 מיקום שונה ומתעדכן במערכת</div>
+        </div>
+        <div style="font-family:monospace;font-size:13px;font-weight:800;color:var(--acc);margin-top:7px">
+          ${esc(m.fromPos)} &#8592; ${esc(m.pos)}
+        </div>
+        <div style="font-size:11px;color:var(--sub);margin-top:2px">${esc(m.sku)} · ${m.qty} ${esc(m.unit)}${m.carton?` · קרטון ${esc(m.carton)}`:''}</div>
+        <div style="font-size:10px;color:var(--mut);margin-top:3px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''} · לחצו לסימון כנצפה</div>
+      </div>`;
+    }
+    return `<div class="mov">
+    <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
+    <div style="flex:1">
+      <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
+        ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
+      </div>
+      <div style="font-size:11px;color:var(--sub);margin-top:1px">
+        ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+        ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
+        ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
+      </div>
+      <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
+    </div>
+  </div>`;
+  };
+
+  const q = logSearch.trim().toLowerCase();
+  const matchesSearch = (m) => {
+    if(!q) return true;
+    const hay = [m.pos, m.fromPos, m.sku, m.by, m.carton, movLabel(m.type), fmtDT(m.ts), m.prev]
+      .filter(Boolean).join(' ').toLowerCase();
+    if(hay.includes(q)) return true;
+    // חיפוש תאריך "חכם" שלא תלוי במפריד/בסדר התאריך — משווים ספרות-בלבד של החיפוש
+    // לכמה וריאציות ספרות אפשריות של תאריך הפעולה (dd/mm, mm/dd, עם/בלי שנה מלאה או מקוצרת וכו').
+    const qDigits = q.replace(/\D/g,'');
+    if(qDigits.length>=2){
+      const d = new Date(m.ts);
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const yyyy = String(d.getFullYear());
+      const yy = yyyy.slice(2);
+      const variants = [dd+mm, mm+dd, dd+mm+yyyy, mm+dd+yyyy, yyyy+mm+dd, dd+mm+yy, yy+mm+dd, dd+yyyy, mm+yyyy, dd, mm];
+      if(variants.some(v=>v.includes(qDigits))) return true;
+    }
+    return false;
+  };
+  const filtered = movs.filter(matchesSearch);
+
+  if(!filtered.length){
+    return `<div class="empty">אין תוצאות תואמות לחיפוש</div>`;
+  }
+
+  // קיבוץ התנועות לפי יום קלנדרי (לפי התאריך המקומי של כל פעולה),
+  // כדי שלא תיווצר רשימה ענקית אחת שצריך לגלול בה — כל יום נפתח בלחיצה בנפרד.
+  const groups = [];
+  const byKey = {};
+  filtered.forEach(m=>{
+    const d = new Date(m.ts);
+    const key = d.toLocaleDateString('en-CA'); // מפתח יציב YYYY-MM-DD לקיבוץ
+    if(!byKey[key]){
+      const label = d.toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',weekday:'long'});
+      byKey[key] = {key, label, items:[]};
+      groups.push(byKey[key]);
+    }
+    byKey[key].items.push(m);
+  });
+
+  return `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${filtered.length} תנועות${q?` (מתוך ${movs.length})`:''} · ${groups.length} ימים</div>` +
+    groups.map(g=>{
+      const isOpen = q ? true : logOpenDates.has(g.key); // בזמן חיפוש פעיל נציג את כל הימים התואמים פתוחים
+      return `<div class="sr" style="flex-direction:column;align-items:stretch;padding:0;cursor:default;margin-bottom:8px;overflow:hidden">
+        <div onclick="toggleLogDate('${g.key}')" style="display:flex;align-items:center;justify-content:space-between;padding:11px 13px;cursor:pointer">
+          <div style="font-size:12px;font-weight:800">📅 ${g.label}</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="badge">${g.items.length}</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);transform:rotate(${isOpen?90:0}deg);transition:transform .15s;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+          </div>
+        </div>
+        ${isOpen ? `<div style="padding:0 13px 11px">${g.items.map(renderMovRow).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+}
 async function addAllowedUser(){
   const name = newUserName.trim();
   const phoneKey = safePhoneKeyClient(newUserPhone);
@@ -1295,7 +1404,7 @@ function render(){
         סורקים את הברקוד שעל המדף, או מקלידים ידנית — אפשר את המיקום (כמו ZA1-01-02F), קוד הברקוד (כמו F00001 או B00001), או אפילו ברקוד קרטון (כמו C000001) — יקפוץ ישר למיקום שאליו הוא משויך
       </div>
       ${scanErr?`<div style="font-size:11px;color:var(--red);text-align:center;margin-top:5px">${esc(scanErr)}</div>`:''}
-      <button class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()">פתח עמדה</button>
+      <button id="scan-open-btn" class="btn btn-p btn-w" style="margin-top:9px" onclick="doScan()" ${(scanVal||'').trim().length<4?'disabled':''}>פתח עמדה</button>
     </div>`;
   }
   else if(tab==='scan' && scanPos){
@@ -1492,107 +1601,67 @@ function render(){
       if(cubesList.length===0){
         contentHtml += `<div class="empty">כל העמדות במעבר זה תפוסות</div>`;
       } else {
+        // מקובץ לפי קומה, כמו במסך המפה — כדי שהזוגות התואמים (למשל 01-01F ו-01-01B)
+        // יופיעו תמיד אחד ליד השני, בדיוק כמו שהם מסודרים פיזית על המדף.
         contentHtml += cubesList.map(({c,total,free})=>{
-          const posLabels = free.map(p=>`<span class="chip" style="cursor:pointer" onclick="goToPosition('${p}')">${p.slice(-6)}</span>`).join(' ');
+          const freeSet = new Set(free);
+          const floors = cubeFloors(c, a).slice().reverse();
+          const floorsWithFree = floors.filter(f=>{
+            for(let p=1;p<=3;p++){ if(freeSet.has(`${a}${c}-${p2(f)}-${p2(p)}F`) || freeSet.has(`${a}${c}-${p2(f)}-${p2(p)}B`)) return true; }
+            return false;
+          });
+          const allClosed = floorsWithFree.length>0 && floorsWithFree.every(f=>emptyClosedFloors.has(`${a}${c}-${f}`));
+
+          const chip = (pid) => freeSet.has(pid)
+            ? `<span class="chip" style="cursor:pointer;flex:1;text-align:center" onclick="goToPosition('${pid}')">${pid.slice(-3)}</span>`
+            : `<span class="chip" style="flex:1;text-align:center;opacity:.3;cursor:default">${pid.slice(-3)}</span>`;
+
+          const floorsHtml = floorsWithFree.map(f=>{
+            const key = `${a}${c}-${f}`;
+            const isOpen = !emptyClosedFloors.has(key);
+            const posF = [1,2,3].map(p=>`${a}${c}-${p2(f)}-${p2(p)}F`);
+            const posB = [1,2,3].map(p=>`${a}${c}-${p2(f)}-${p2(p)}B`);
+            const floorFreeCount = [...posF,...posB].filter(pid=>freeSet.has(pid)).length;
+            return `<div style="border-top:1px solid var(--b);padding-top:7px;margin-top:7px">
+              <div onclick="toggleEmptyFloor('${key}')" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+                <div style="font-size:11px;font-weight:800">קומה ${p2(f)}</div>
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span class="badge">${floorFreeCount} פנויות</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);transform:rotate(${isOpen?90:0}deg);transition:transform .15s;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+              </div>
+              ${isOpen ? `
+                <div style="font-size:9px;color:var(--blue);font-weight:700;margin-top:6px">🔵 FRONT</div>
+                <div style="display:flex;gap:5px">${posF.map(chip).join('')}</div>
+                <div style="font-size:9px;color:#C77DFF;font-weight:700;margin-top:4px">🟣 BACK</div>
+                <div style="display:flex;gap:5px">${posB.map(chip).join('')}</div>
+              ` : ''}
+            </div>`;
+          }).join('');
+
           return `<div class="fsec">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;flex-wrap:wrap;gap:6px">
               <div class="row-id">קובייה ${c}</div>
-              <div class="row-meta" style="flex:none">${free.length}/${total} פנויות</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="row-meta" style="flex:none">${free.length}/${total} פנויות</div>
+                <button class="btn btn-g btn-sm" onclick="${allClosed?`expandAllEmptyFloors('${a}',${c})`:`collapseAllEmptyFloors('${a}',${c})`}">${allClosed?'⬇️ הרחב הכל':'⬆️ כווץ הכל'}</button>
+              </div>
             </div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">${posLabels}</div>
+            ${floorsHtml}
           </div>`;
         }).join('');
       }
     }
   }
   else if(tab==='log'){
-    const movIcon = t => t==='in'?'in':t==='out'?'out':t==='move'?'move':t==='link'?'link':'edit';
-    const movSymbol = t => t==='in'?'↓':t==='out'?'↑':t==='move'?'🔀':t==='link'?'📦':'✎';
-    const movLabel = t => t==='in'?'הוכנס':t==='out'?'הוצא':t==='move'?'הועבר':t==='link'?'שויך קרטון':'עודכן';
-
-    const renderMovRow = (m) => {
-      if(m.type==='move' && m.alertPending){
-        // התראה בולטת ואדומה (בסגנון וואטסאפ) — רק לשינויי מיקום שביצע עובד מחסן (121212).
-        // נעלמת (הופכת לשורה רגילה) ברגע שלוחצים עליה.
-        return `<div onclick="dismissMoveAlert('${m._key}')" style="cursor:pointer;background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.4);border-radius:14px;padding:11px 14px;margin-bottom:9px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="width:24px;height:24px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;color:#fff">🔀</div>
-            <div style="font-size:12px;font-weight:900;color:var(--red)">📍 מיקום שונה ומתעדכן במערכת</div>
-          </div>
-          <div style="font-family:monospace;font-size:13px;font-weight:800;color:var(--acc);margin-top:7px">
-            ${esc(m.fromPos)} &#8592; ${esc(m.pos)}
-          </div>
-          <div style="font-size:11px;color:var(--sub);margin-top:2px">${esc(m.sku)} · ${m.qty} ${esc(m.unit)}${m.carton?` · קרטון ${esc(m.carton)}`:''}</div>
-          <div style="font-size:10px;color:var(--mut);margin-top:3px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''} · לחצו לסימון כנצפה</div>
-        </div>`;
-      }
-      return `<div class="mov">
-      <div class="mov-ic ${movIcon(m.type)}">${movSymbol(m.type)}</div>
-      <div style="flex:1">
-        <div style="font-family:monospace;font-size:11px;font-weight:800;color:var(--acc)">
-          ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
-        </div>
-        <div style="font-size:11px;color:var(--sub);margin-top:1px">
-          ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
-          ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
-          ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
-        </div>
-        <div style="font-size:10px;color:var(--mut);margin-top:1px">${fmtDT(m.ts)}${m.by?` · ${esc(m.by)}`:''}</div>
-      </div>
-    </div>`;
-    };
-
-    const searchBar = `<div class="fg" style="margin-bottom:11px">
-      <input id="log-search-input" class="finp rtl" placeholder="🔍 חיפוש לפי תאריך / פעולה / עובד / דגם / קרטון / מיקום" value="${esc(logSearch)}"
-        oninput="setLogSearch(this.value)">
-    </div>`;
-
     if(!movs.length){
       contentHtml = `<div class="empty">אין תנועות עדיין</div>`;
     } else {
-      const q = logSearch.trim().toLowerCase();
-      const matchesSearch = (m) => {
-        if(!q) return true;
-        const hay = [m.pos, m.fromPos, m.sku, m.by, m.carton, movLabel(m.type), fmtDT(m.ts), m.prev]
-          .filter(Boolean).join(' ').toLowerCase();
-        return hay.includes(q);
-      };
-      const filtered = movs.filter(matchesSearch);
-
-      if(!filtered.length){
-        contentHtml = searchBar + `<div class="empty">אין תוצאות תואמות לחיפוש</div>`;
-      } else {
-        // קיבוץ התנועות לפי יום קלנדרי (לפי התאריך המקומי של כל פעולה),
-        // כדי שלא תיווצר רשימה ענקית אחת שצריך לגלול בה — כל יום נפתח בלחיצה בנפרד.
-        const groups = [];
-        const byKey = {};
-        filtered.forEach(m=>{
-          const d = new Date(m.ts);
-          const key = d.toLocaleDateString('en-CA'); // מפתח יציב YYYY-MM-DD לקיבוץ
-          if(!byKey[key]){
-            const label = d.toLocaleDateString('he-IL',{day:'2-digit',month:'2-digit',year:'numeric',weekday:'long'});
-            byKey[key] = {key, label, items:[]};
-            groups.push(byKey[key]);
-          }
-          byKey[key].items.push(m);
-        });
-
-        contentHtml = searchBar +
-          `<div style="font-size:11px;color:var(--sub);margin-bottom:9px">${filtered.length} תנועות${q?` (מתוך ${movs.length})`:''} · ${groups.length} ימים</div>` +
-          groups.map(g=>{
-            const isOpen = q ? true : logOpenDates.has(g.key); // בזמן חיפוש פעיל נציג את כל הימים התואמים פתוחים
-            return `<div class="sr" style="flex-direction:column;align-items:stretch;padding:0;cursor:default;margin-bottom:8px;overflow:hidden">
-              <div onclick="toggleLogDate('${g.key}')" style="display:flex;align-items:center;justify-content:space-between;padding:11px 13px;cursor:pointer">
-                <div style="font-size:12px;font-weight:800">📅 ${g.label}</div>
-                <div style="display:flex;align-items:center;gap:8px">
-                  <span class="badge">${g.items.length}</span>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);transform:rotate(${isOpen?90:0}deg);transition:transform .15s;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
-                </div>
-              </div>
-              ${isOpen ? `<div style="padding:0 13px 11px">${g.items.map(renderMovRow).join('')}</div>` : ''}
-            </div>`;
-          }).join('');
-      }
+      const searchBar = `<div class="fg" style="margin-bottom:11px">
+        <input id="log-search-input" class="finp rtl" placeholder="🔍 חיפוש לפי תאריך / פעולה / עובד / דגם / קרטון / מיקום" value="${esc(logSearch)}"
+          oninput="setLogSearch(this.value)">
+      </div>`;
+      contentHtml = searchBar + `<div id="log-results">${renderLogResultsHtml()}</div>`;
     }
   }
   else if(tab==='settings'){
@@ -1858,7 +1927,11 @@ window.removeFNamePart = removeFNamePart;
 window.setFQty = (v)=>{ fQty = v.replace(/[^0-9]/g,''); };
 window.setFUnit = (v)=>{ fUnit = v; };
 window.setFNote = (v)=>{ fNote = v; };
-window.setScanVal = (v)=>{ scanVal = v.toUpperCase(); scanErr=''; };
+window.setScanVal = (v)=>{
+  scanVal = v.toUpperCase(); scanErr='';
+  const btn = document.getElementById('scan-open-btn');
+  if(btn) btn.disabled = scanVal.trim().length < 4; // עדכון מיידי בלי render() מלא, כדי לא לאבד מיקום סמן בזמן הקלדה/סריקה
+};
 window.setSQ = (v)=>{ sq = v; render(); };
 window.goToPosFromSearch = (posId)=>{ tab='map'; mPos=posId; editingItem=null; render(); };
 window.scrollContentTop = scrollContentTop;
@@ -1879,6 +1952,9 @@ window.setCalcQty = setCalcQty;
 window.goToPosition = goToPosition;
 window.setEmptyReportAisle = setEmptyReportAisle;
 window.backEmptyReportAisleList = backEmptyReportAisleList;
+window.toggleEmptyFloor = toggleEmptyFloor;
+window.collapseAllEmptyFloors = collapseAllEmptyFloors;
+window.expandAllEmptyFloors = expandAllEmptyFloors;
 window.exportEmptyReport = exportEmptyReport;
 window.closeCameraScan = closeCameraScan;
 window.scanShelfCamera = scanShelfCamera;
