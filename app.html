@@ -276,6 +276,7 @@ let logSearch = ""; // טקסט חיפוש בעמוד היומן
 let logOpenDates = new Set(); // מפתחות תאריך (YYYY-MM-DD) שפתוחים כרגע ביומן
 let modelsListOpen = false; // האם רשימת כל הדגמים באחסנה פתוחה בעמוד הבית
 let tab = "map";
+let _lastViewKey = null; // "מזהה מסך" ששמור מה-render() הקודם, כדי להבחין בין "אותו מסך התעדכן" (לשמר גלילה) ל"עברנו למסך אחר" (לאפס גלילה) — ר' render()
 let previousTab = null; // לכפתור "חזרה לעמוד הקודם" הכללי
 let mAisle=null, mCube=null, mPos=null;
 // ── מצב עריכה/החלפת FRONT⇄BACK בגרירה בתוך קומה ─────────────────────────────
@@ -1262,6 +1263,15 @@ function render(){
   const _activeEl = document.activeElement;
   const _activeId = (_activeEl && _activeEl.id) ? _activeEl.id : null;
   const _activeSel = (_activeEl && typeof _activeEl.selectionStart === 'number') ? _activeEl.selectionStart : null;
+  // שמירת מיקום הגלילה של אזור התוכן — root.innerHTML הורס ובונה מחדש את #content-scroll,
+  // מה שמאפס גלילה ל-0 כברירת מחדל. בלי זה, כל render() (למשל לחיצה על עריכת קומה עמוק
+  // ברשימה) "קופצת" את המסך בחזרה למעלה במקום להישאר באותה קומה/מיקום.
+  // משחזרים גלילה רק אם עדיין נמצאים על "אותו מסך" בדיוק (אותו tab/מעבר/קוביה/מיקום) —
+  // אחרת (ניווט אמיתי לעמוד אחר) רוצים שהגלילה תתחיל מלמעלה כרגיל.
+  const _viewKey = JSON.stringify([tab, mAisle, mCube, mPos, emptyReportAisle, scanPos]);
+  const _prevContentEl = document.getElementById('content-scroll');
+  const _scrollTop = (_prevContentEl && _lastViewKey===_viewKey) ? _prevContentEl.scrollTop : 0;
+  _lastViewKey = _viewKey;
 
   const occupiedPositions = ALL_POS.filter(isOccupied);
   const usedCount = occupiedPositions.length;
@@ -1809,6 +1819,17 @@ function render(){
         // to make sure it actually sticks (this is what caused digits to appear reversed).
         requestAnimationFrame(()=>{ try{ el.setSelectionRange(_activeSel,_activeSel); }catch{} });
       }
+    }
+  }
+
+  // שחזור מיקום הגלילה שנשמר בתחילת render() — ה-DOM נבנה מחדש לגמרי אז חייבים להגדיר
+  // scrollTop שוב באופן מפורש (בלי requestAnimationFrame הדפדפן לפעמים עוד לא סיים לפרוס
+  // את התוכן החדש ולא "תופס" את הערך).
+  if(_scrollTop){
+    const _newContentEl = document.getElementById('content-scroll');
+    if(_newContentEl){
+      _newContentEl.scrollTop = _scrollTop;
+      requestAnimationFrame(()=>{ _newContentEl.scrollTop = _scrollTop; });
     }
   }
 
