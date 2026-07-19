@@ -266,6 +266,10 @@ let calcQty = {}; // כמות לכל סוג קרטון נבחר, לפי שם
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
 let emptyReportAisle = null; // null = show aisle summary list; else drill into that aisle
 let emptyClosedFloors = new Set(); // מפתחות "מעברקוביה-קומה" (למשל "ZA1-05") שמכווצות בדוח העמדות הפנויות
+// ── שריון SKU מראש למספר מיקומים פנויים בבת אחת (לפני שהקרטון הפיזי מגיע) ────────
+let emptySelectMode = false; // האם דוח העמדות הפנויות נמצא במצב "בחירת מיקומים לדגם"
+let emptySelected = new Set(); // מיקומים פנויים שנבחרו לשריון
+let reserveSku = "", reserveName = "";
 
 let data = {};
 // ── ניהול משתמשים מאושרים (למנהלים בלבד) ────────────────────────────────────
@@ -488,12 +492,48 @@ function setCalcQty(name, val){
 }
 
 // ── דוח עמדות ריקות ────────────────────────────────────────────────────────────
-function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; render(); }
-function setEmptyReportAisle(a){ emptyReportAisle=a; render(); }
-function backEmptyReportAisleList(){ emptyReportAisle=null; render(); }
+function openEmptyReport(){ tab='emptyReport'; emptyReportAisle=null; emptySelectMode=false; emptySelected=new Set(); render(); }
+function setEmptyReportAisle(a){ emptyReportAisle=a; emptySelectMode=false; emptySelected=new Set(); render(); }
+function backEmptyReportAisleList(){ emptyReportAisle=null; emptySelectMode=false; emptySelected=new Set(); render(); }
 function toggleEmptyFloor(key){ if(emptyClosedFloors.has(key)) emptyClosedFloors.delete(key); else emptyClosedFloors.add(key); render(); }
 function collapseAllEmptyFloors(a,c){ cubeFloors(c,a).forEach(f=>emptyClosedFloors.add(`${a}${c}-${f}`)); render(); }
 function expandAllEmptyFloors(a,c){ cubeFloors(c,a).forEach(f=>emptyClosedFloors.delete(`${a}${c}-${f}`)); render(); }
+
+// ── שריון SKU מראש למספר מיקומים פנויים (לפני שהקרטון הפיזי הגיע) ──────────────
+// מיועד לתהליך העבודה בפועל: מנהל.ת כבר יודע.ת איזה דגם ובכמה קרטונים מגיע,
+// ומסמן.ת מראש את המיקומים המיועדים לו; העובד.ת בשטח פשוט הולך.ת למיקומים המסומנים
+// (רואה אותם באדום על המפה) ומשייך.ת את הקרטון הפיזי בפועל כשהוא מגיע.
+function toggleEmptySelectMode(){
+  emptySelectMode = !emptySelectMode;
+  emptySelected = new Set();
+  reserveSku=""; reserveName="";
+  render();
+}
+function toggleEmptySelectPos(posId){
+  if(!emptySelectMode) return;
+  if(emptySelected.has(posId)) emptySelected.delete(posId); else emptySelected.add(posId);
+  render();
+}
+window.setReserveSku = (v)=>{ reserveSku = v.toUpperCase(); };
+window.setReserveName = (v)=>{ reserveName = v; };
+async function confirmReserveSkuToSelected(){
+  const sku = reserveSku.trim().toUpperCase();
+  if(!sku){ notify('חובה להזין SKU / דגם','warn'); return; }
+  if(emptySelected.size===0) return;
+  const name = reserveName.trim();
+  const positions = Array.from(emptySelected);
+  for(const posId of positions){
+    const id = mkId();
+    const entry = { sku, name, qty:0, unit:'', note:'', cartonBarcode:null, reserved:true, updatedAt:new Date().toISOString() };
+    await db.ref(`positions/${fkey(posId)}/items/${id}`).set(entry);
+    await db.ref('movements/'+mkId()).set({
+      ts:new Date().toISOString(), pos:posId, type:'in', sku, qty:null, unit:'', by: currentUserLabel(), note:'שוריין מראש — ממתין לשיוך קרטון'
+    });
+  }
+  notify(`✓ ${sku} שוריין ל-${positions.length} מיקומים — ממתינים לשיוך קרטון`);
+  emptySelectMode=false; emptySelected=new Set(); reserveSku=""; reserveName="";
+  render();
+}
 function exportEmptyReport(aisle){
   const positions = (aisle ? ALL_POS.filter(p=>p.startsWith(aisle)) : ALL_POS).filter(p=>!isOccupied(p));
   if(positions.length===0){ notify('אין עמדות ריקות לייצוא','warn'); return; }
@@ -919,7 +959,8 @@ function renderLogResultsHtml(){
         ${m.type==='move' ? `${esc(m.fromPos)} &#8592; ${esc(m.pos)}` : esc(m.pos)}
       </div>
       <div style="font-size:11px;color:var(--sub);margin-top:1px">
-        ${movLabel(m.type)} · ${esc(m.sku)} · ${m.qty} ${esc(m.unit)}
+        ${movLabel(m.type)} · ${esc(m.sku)}${m.qty!=null?` · ${m.qty} ${esc(m.unit)}`:''}
+        ${m.note?`<span style="color:var(--acc)"> · ${esc(m.note)}</span>`:''}
         ${m.carton?`<span style="color:var(--mut)"> · קרטון ${esc(m.carton)}</span>`:''}
         ${m.prev?`<span style="color:var(--mut)"> (היה: ${esc(m.prev)})</span>`:''}
       </div>
@@ -1099,14 +1140,18 @@ function renderPosView(posId){
       const posKey = posId+'::'+itemId;
       const hasPending = pendingCounted.hasOwnProperty(posKey);
       const displayVal = hasPending ? pendingCounted[posKey] : item.counted;
+      const isPendingCarton = !!item.reserved && !item.cartonBarcode;
       return `
-      <div class="item-card">
+      <div class="item-card" ${isPendingCarton?'style="border-color:var(--red);background:rgba(239,68,68,.08)"':''}>
+        ${isPendingCarton?`<div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px">🔴 שוריין מראש — ממתין לשיוך קרטון פיזי</div>`:''}
         <div class="item-sku">${esc(item.sku)}</div>
         ${item.name?`<div class="item-name">${esc(item.name)}</div>`:''}
-        <div class="item-qty-row">
+        ${isPendingCarton
+          ? `<div style="font-size:11px;color:var(--sub);margin-top:5px">הכמות תתעדכן כשיישוייך קרטון</div>`
+          : `<div class="item-qty-row">
           <div class="item-qty">${Number(item.qty).toLocaleString()}</div>
           <div class="item-unit">${esc(item.unit)}</div>
-        </div>
+        </div>`}
         ${item.note?`<div class="item-note">${esc(item.note)}</div>`:''}
         ${item.cartonBarcode?`<div class="item-carton">📦 קרטון משויך: ${esc(item.cartonBarcode)}</div>`:''}
         <div class="item-date">עודכן: ${fmtD(item.updatedAt)}</div>
@@ -1349,6 +1394,9 @@ function render(){
       const items = itemsOf(pid);
       const posNum = pid.slice(-3,-1);
       const pendingSwap = editable && floorSwapPending.has(posNum);
+      // האם יש כאן פריט ששוריין מראש לדגם אבל עדיין לא שויך לו קרטון פיזי —
+      // אלה בדיוק המיקומים שהעובד.ת בשטח צריך.ה לשים לב אליהם ולהביא אליהם קרטון.
+      const pendingCartonItem = items.find(([iid,itm])=>itm.reserved && !itm.cartonBarcode);
       let inner;
       if(items.length===0){
         inner = '<div style="font-size:10px;color:var(--mut);margin-top:2px">ריק</div>';
@@ -1359,17 +1407,19 @@ function render(){
         inner = `
           <div style="font-size:11px;font-weight:900;color:var(--acc);font-family:monospace;margin-top:2px">${esc(it.sku)}</div>
           ${it.name?`<div style="font-size:9.5px;color:var(--txt);margin-top:1px">${esc(it.name)}</div>`:''}
-          <div style="font-size:9.5px;color:var(--sub);margin-top:1px">${cartonLine}${extra}</div>`;
+          ${pendingCartonItem
+            ? `<div style="font-size:9.5px;color:var(--red);font-weight:800;margin-top:1px">🔴 ממתין לקרטון${extra}</div>`
+            : `<div style="font-size:9.5px;color:var(--sub);margin-top:1px">${cartonLine}${extra}</div>`}`;
       }
       const clickAttr = editable ? '' : `onclick="setPos('${pid}')"`;
       const dragAttrs = editable
         ? `draggable="true" ondragstart="onDragStartPos(event,'${pid}')" ondragover="onDragOverPos(event,'${pid}')" ondrop="onDropPos(event,'${pid}')" ondragend="onDragEndPos()"`
         : '';
-      const border = pendingSwap ? 'var(--acc)' : (items.length?'var(--ag)':'var(--b)');
-      const bg = pendingSwap ? 'var(--ag)' : (items.length?'var(--ad)':'var(--surf)');
+      const border = pendingSwap ? 'var(--acc)' : pendingCartonItem ? 'var(--red)' : (items.length?'var(--ag)':'var(--b)');
+      const bg = pendingSwap ? 'var(--ag)' : pendingCartonItem ? 'rgba(239,68,68,.14)' : (items.length?'var(--ad)':'var(--surf)');
       return `<div ${clickAttr} ${dragAttrs}
         style="flex:1;background:${bg};border:1px ${pendingSwap?'dashed':'solid'} ${border};border-radius:var(--rs);padding:8px 4px;text-align:center;cursor:${editable?'grab':'pointer'};user-select:none">
-        <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}${pendingSwap?' 🔁':''}</div>
+        <div style="font-size:10px;color:var(--sub);font-family:monospace;font-weight:700">עמדה ${posNum}${pendingSwap?' 🔁':''}${pendingCartonItem?' 🔴':''}</div>
         ${inner}
       </div>`;
     };
@@ -1606,10 +1656,14 @@ function render(){
       }).filter(x=>x.free.length>0);
       cubesList.sort((x,y)=>y.free.length-x.free.length);
 
-      contentHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      contentHtml = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;gap:6px">
         <div class="sec-ttl" style="margin-bottom:0">מעבר ${a} — עמדות פנויות (ממוין לפי כמות)</div>
-        <button class="btn btn-blue btn-sm" onclick="exportEmptyReport('${a}')">📥 ייצוא</button>
-      </div>`;
+        <div style="display:flex;gap:6px">
+          <button class="btn ${emptySelectMode?'btn-d':'btn-p'} btn-sm" onclick="toggleEmptySelectMode()">${emptySelectMode?'✖ ביטול בחירה':'📌 בחירת מיקומים לדגם'}</button>
+          <button class="btn btn-blue btn-sm" onclick="exportEmptyReport('${a}')">📥 ייצוא</button>
+        </div>
+      </div>
+      ${emptySelectMode?`<div style="font-size:11px;color:var(--sub);margin-bottom:10px">בחרי מיקומים פנויים (לחיצה מסמנת/מבטלת), ואז הזיני את הדגם שישוריין להם למטה.</div>`:''}`;
 
       if(cubesList.length===0){
         contentHtml += `<div class="empty">כל העמדות במעבר זה תפוסות</div>`;
@@ -1625,9 +1679,14 @@ function render(){
           });
           const allClosed = floorsWithFree.length>0 && floorsWithFree.every(f=>emptyClosedFloors.has(`${a}${c}-${f}`));
 
-          const chip = (pid) => freeSet.has(pid)
-            ? `<span class="chip" style="cursor:pointer;flex:1;text-align:center" onclick="goToPosition('${pid}')">${pid.slice(-3)}</span>`
-            : `<span class="chip" style="flex:1;text-align:center;opacity:.3;cursor:default">${pid.slice(-3)}</span>`;
+          const chip = (pid) => {
+            if(!freeSet.has(pid)) return `<span class="chip" style="flex:1;text-align:center;opacity:.3;cursor:default">${pid.slice(-3)}</span>`;
+            if(emptySelectMode){
+              const isSel = emptySelected.has(pid);
+              return `<span class="chip" style="flex:1;text-align:center;cursor:pointer;${isSel?'background:var(--red);color:#fff;border-color:var(--red);font-weight:900':''}" onclick="toggleEmptySelectPos('${pid}')">${isSel?'✓ ':''}${pid.slice(-3)}</span>`;
+            }
+            return `<span class="chip" style="cursor:pointer;flex:1;text-align:center" onclick="goToPosition('${pid}')">${pid.slice(-3)}</span>`;
+          };
 
           const floorsHtml = floorsWithFree.map(f=>{
             const key = `${a}${c}-${f}`;
@@ -1791,7 +1850,20 @@ function render(){
       <div class="bulk-bar">
         <button class="btn btn-d btn-w" onclick="askBulkRemove()">🗑 הוצא ${searchSelected.size} פריטים נבחרים מהמחסן</button>
       </div>` : ''}
-      <div class="scroll-wrap" id="scroll-wrap" style="bottom:${(tab==='search' && searchSelected.size>0) ? 122 : 66}px">
+      ${(tab==='emptyReport' && emptySelectMode && emptySelected.size>0) ? `
+      <div class="bulk-bar">
+        <div style="font-size:11px;color:var(--sub);margin-bottom:7px">📌 ${emptySelected.size} מיקומים נבחרו — שריון דגם:</div>
+        <div class="frow" style="margin-bottom:7px">
+          <div class="fg" style="margin-bottom:0">
+            <input class="finp" placeholder="SKU / דגם" value="${esc(reserveSku)}" oninput="setReserveSku(this.value)">
+          </div>
+          <div class="fg" style="margin-bottom:0">
+            <input class="finp rtl" placeholder="שם (לא חובה)" value="${esc(reserveName)}" oninput="setReserveName(this.value)">
+          </div>
+        </div>
+        <button class="btn btn-p btn-w" onclick="confirmReserveSkuToSelected()">🔴 שריין ל-${emptySelected.size} מיקומים</button>
+      </div>` : ''}
+      <div class="scroll-wrap" id="scroll-wrap" style="bottom:${(tab==='search' && searchSelected.size>0) || (tab==='emptyReport' && emptySelectMode && emptySelected.size>0) ? 176 : 66}px">
         <button class="scroll-btn" id="scroll-top-btn" onclick="scrollContentTop()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg></button>
         <button class="scroll-btn" id="scroll-bottom-btn" onclick="scrollContentBottom()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></button>
       </div>
@@ -1979,6 +2051,9 @@ window.backEmptyReportAisleList = backEmptyReportAisleList;
 window.toggleEmptyFloor = toggleEmptyFloor;
 window.collapseAllEmptyFloors = collapseAllEmptyFloors;
 window.expandAllEmptyFloors = expandAllEmptyFloors;
+window.toggleEmptySelectMode = toggleEmptySelectMode;
+window.toggleEmptySelectPos = toggleEmptySelectPos;
+window.confirmReserveSkuToSelected = confirmReserveSkuToSelected;
 window.exportEmptyReport = exportEmptyReport;
 window.closeCameraScan = closeCameraScan;
 window.scanShelfCamera = scanShelfCamera;
