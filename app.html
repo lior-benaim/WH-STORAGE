@@ -331,6 +331,8 @@ function itemsOf(posId){
   return Object.entries(p.items);
 }
 function isOccupied(posId){ return itemsOf(posId).length > 0; }
+// האם למיקום הזה יש פריט ששוריין מראש לדגם אבל עדיין לא שויך לו קרטון פיזי (ר' confirmReserveSkuToSelected)
+function hasPendingCarton(posId){ return itemsOf(posId).some(([iid,itm])=>itm.reserved && !itm.cartonBarcode); }
 
 // ── Firebase listeners ────────────────────────────────────────────────────────
 // Security: the database itself now requires a valid Firebase Auth session
@@ -1343,10 +1345,13 @@ function render(){
       const positions = ALL_POS.filter(pos=>pos.startsWith(a));
       const used = positions.filter(isOccupied).length;
       const pct = Math.min(100, Math.round(used/positions.length*100));
-      return `<div class="tile" onclick="setAisle('${a}')">
+      const pendingCount = positions.filter(hasPendingCarton).length;
+      return `<div class="tile" style="position:relative;${pendingCount?'border-color:var(--red)':''}" onclick="setAisle('${a}')">
+        ${pendingCount?`<div style="position:absolute;top:6px;left:6px;width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 0 3px rgba(239,68,68,.25)"></div>`:''}
         <div class="tile-name">${a}</div>
         <div class="tile-sub">${used}/${positions.length}</div>
         <div class="fill-bar"><div class="fill-inner" style="width:${pct}%"></div></div>
+        ${pendingCount?`<div style="font-size:9px;color:var(--red);font-weight:800;margin-top:3px">🔴 ${pendingCount} ממתינות</div>`:''}
       </div>`;
     }).join('');
     contentHtml = `
@@ -1378,10 +1383,11 @@ function render(){
     const rows = CUBES.map(c=>{
       const positions = ALL_POS.filter(pos=>pos.startsWith(`${mAisle}${c}-`));
       const used = positions.filter(isOccupied).length;
-      return `<div class="row" onclick="setCube(${c})">
-        <div class="row-id">קובייה ${c}</div>
+      const pendingCount = positions.filter(hasPendingCarton).length;
+      return `<div class="row" style="${pendingCount?'border-color:var(--red)':''}" onclick="setCube(${c})">
+        <div class="row-id" style="display:flex;align-items:center;gap:5px">${pendingCount?`<span style="width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 2px rgba(239,68,68,.25);flex-shrink:0"></span>`:''}קובייה ${c}</div>
         <div style="flex:1">
-          <div class="row-meta">${used}/${positions.length} עמדות תפוסות</div>
+          <div class="row-meta">${used}/${positions.length} עמדות תפוסות${pendingCount?` · <span style="color:var(--red);font-weight:800">🔴 ${pendingCount} ממתינות לקרטון</span>`:''}</div>
           ${(WALKWAY.includes(c) && mAisle!==WALKWAY_EXCEPTION_AISLE)?'<div style="font-size:9px;color:var(--blue)">מעבר רגלי — קומות 5-11</div>':''}
         </div>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--mut);flex-shrink:0"><polyline points="15 18 9 12 15 6"/></svg>
